@@ -7,11 +7,12 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.models import Job, UserPhoto
 from app.providers.base import ProviderBadRequestError
 from app.providers.registry import ProviderRegistry
 from app.services.storage import StorageBackend
-from app.services.vision.lock_engine import composite_crop_back, compute_scope_crop_rect
+from app.worker.lock_engine import compose_result, prepare_controlled_patch
 
 
 async def execute_job(
@@ -21,6 +22,7 @@ async def execute_job(
     registry: ProviderRegistry,
     on_progress: Callable[[int], Awaitable[None]] | None = None,
 ) -> None:
+    settings = get_settings()
     provider = registry.get(job.provider)
 
     if job.type == 'tryon_image':
@@ -35,7 +37,14 @@ async def execute_job(
 
         if scope != 'full' and (mode == 'strict' or force_lock):
             person_bytes = await storage.get_bytes(person_key)
-            crop_bytes, crop_rect = _crop_person_bytes(person_bytes, scope)
+            plan = await prepare_controlled_patch(
+                settings=settings,
+                storage=storage,
+                job_id=str(job.id),
+                base_image_bytes=person_bytes,
+                scope=scope,
+            )
+            crop_bytes, crop_rect = _crop_person_bytes(person_bytes, plan.crop_rect)
             crop_key = f'tryon/jobs/{job.id}/tmp/person_crop.jpg'
             await storage.put_bytes(crop_key, crop_bytes, content_type='image/jpeg')
 
@@ -51,7 +60,12 @@ async def execute_job(
                 on_progress=on_progress,
             )
             edited_crop_bytes = await storage.get_bytes(result.storage_key)
-            final_bytes = composite_crop_back(person_bytes, edited_crop_bytes, crop_rect, feather_px=12)
+            final_bytes = await compose_result(
+                settings=settings,
+                base_image_bytes=person_bytes,
+                edited_patch_bytes=edited_crop_bytes,
+                plan=plan,
+            )
             output_key = f'tryon/jobs/{job.id}/output/image.jpg'
             await storage.put_bytes(output_key, final_bytes, content_type='image/jpeg')
             job.result_image_key = output_key
@@ -59,7 +73,9 @@ async def execute_job(
                 **(result.metadata or {}),
                 'mode': mode,
                 'scope': scope,
-                'lock_engine': 'crop_v1',
+                'lock_engine': plan.lock_engine,
+                'parsing_backend': plan.parsing_backend,
+                'mask_area_ratio': plan.mask_area_ratio,
                 'force_lock': force_lock,
             }
             return
@@ -125,9 +141,8 @@ def _input(job: Job, key: str, default: str) -> str:
     return default
 
 
-def _crop_person_bytes(person_bytes: bytes, scope: str) -> tuple[bytes, tuple[int, int, int, int]]:
+def _crop_person_bytes(person_bytes: bytes, rect: tuple[int, int, int, int]) -> tuple[bytes, tuple[int, int, int, int]]:
     image = Image.open(BytesIO(person_bytes)).convert('RGB')
-    rect = compute_scope_crop_rect(image.width, image.height, scope)
     cropped = image.crop(rect)
     out = BytesIO()
     cropped.save(out, format='JPEG')
