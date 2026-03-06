@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db.session import engine
+from app.providers import build_default_registry
 from app.services.storage import create_storage
 from app.worker.loop import run_worker_loop
 
@@ -31,10 +32,17 @@ async def _run() -> None:
 
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     storage = create_storage(settings)
+    registry = build_default_registry(storage)
 
     try:
         logger.info('Worker started')
-        await run_worker_loop(redis=redis, settings=settings, storage=storage, shutdown_event=shutdown_event)
+        await run_worker_loop(
+            redis=redis,
+            settings=settings,
+            storage=storage,
+            registry=registry,
+            shutdown_event=shutdown_event,
+        )
     finally:
         await redis.aclose()
         await engine.dispose()

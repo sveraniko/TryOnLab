@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
+from app.providers import build_default_registry
+from app.providers.registry import ProviderRegistry
 from app.services.jobs import ensure_user_settings, upsert_user
 from app.services.storage import StorageBackend, create_storage
 
@@ -30,6 +32,15 @@ def _get_storage_cached() -> StorageBackend:
 
 async def get_storage() -> StorageBackend:
     return _get_storage_cached()
+
+
+@lru_cache(maxsize=1)
+def _get_provider_registry_cached() -> ProviderRegistry:
+    return build_default_registry(_get_storage_cached())
+
+
+async def get_provider_registry() -> ProviderRegistry:
+    return _get_provider_registry_cached()
 
 
 async def get_current_user(

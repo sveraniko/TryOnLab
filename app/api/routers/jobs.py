@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db_session, get_redis, get_storage
+from app.api.deps import get_current_user, get_db_session, get_provider_registry, get_redis, get_storage
 from app.api.schemas.jobs import JobCreateResponse, JobRetryResponse, JobStatusResponse, VideoJobCreateResponse
 from app.core.config import Settings, get_settings
 from app.db.models import User
+from app.providers.registry import ProviderRegistry
 from app.services.job_status import set_job_status
 from app.services.jobs import (
     create_image_job,
@@ -32,13 +33,16 @@ def _provider_allowlist(settings: Settings) -> set[str]:
     return {item for item in values if item}
 
 
-def _validate_provider(provider: str, settings: Settings) -> str:
+def _validate_provider(provider: str, settings: Settings, registry: ProviderRegistry) -> str:
     normalized = provider.strip().lower()
     if not normalized:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider cannot be empty')
 
     if normalized not in _provider_allowlist(settings):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider is not allowed')
+
+    if normalized not in registry.list():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider is not registered')
 
     return normalized
 
@@ -62,6 +66,7 @@ async def create_job(
     storage: StorageBackend = Depends(get_storage),
     current_user: User = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    registry: ProviderRegistry = Depends(get_provider_registry),
 ) -> JobCreateResponse:
     if (person_image is None and user_photo_id is None) or (person_image is not None and user_photo_id is not None):
         raise HTTPException(
@@ -92,7 +97,7 @@ async def create_job(
     user_settings = await ensure_user_settings(
         session, user_id=current_user.id, default_provider=settings.ai_provider_default
     )
-    selected_provider = _validate_provider(provider or user_settings.provider, settings)
+    selected_provider = _validate_provider(provider or user_settings.provider, settings, registry)
 
     job_id = uuid.uuid4()
     product_key = job_key(job_id, 'input', product_filename)
@@ -186,12 +191,13 @@ async def create_video_job_endpoint(
     redis: Redis = Depends(get_redis),
     current_user: User = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
+    registry: ProviderRegistry = Depends(get_provider_registry),
 ) -> VideoJobCreateResponse:
     image_job = await get_job_for_user(session, job_id=job_id, user_id=current_user.id)
     video_job = await create_video_job(
         session,
         parent_job=image_job,
-        provider=_validate_provider(image_job.provider, settings),
+        provider=_validate_provider(image_job.provider, settings, registry),
         preset=preset,
         retention_hours=settings.retention_hours,
     )
