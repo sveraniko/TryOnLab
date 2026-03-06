@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     database_url: str = 'postgresql+asyncpg://tryonlab:tryonlab@postgres:5432/tryonlab'
     redis_url: str = 'redis://redis:6379/0'
 
+    retention_hours: int = 72
+    max_upload_mb: int = 12
+    job_queue_key: str = 'queue:jobs'
+    job_status_ttl_seconds: int = 3600
+
     storage_backend: str = 'local'
     storage_local_dir: str = '/app/storage'
     storage_public_base_url: str = ''
