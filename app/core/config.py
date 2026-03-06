@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     storage_s3_use_ssl: bool = False
     storage_s3_public_base_url: str = ''
 
+    vision_parsing_backend: str = 'none'
+    vision_parsing_model_path: str = '/app/models/human_parsing.onnx'
+    vision_mask_margin_px: int = 24
+    vision_mask_dilate_px: int = 12
+    vision_mask_feather_px: int = 16
+    vision_debug_save_masks: bool = False
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

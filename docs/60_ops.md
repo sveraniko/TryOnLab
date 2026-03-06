@@ -281,3 +281,7 @@
 - логи ротировать (docker logging driver / logrotate)
 
 ---
+
+
+## PR-12: Human parsing model mount (mask-aware lock engine)
+Для улучшенного controlled generation можно включить parsing backend в worker: `VISION_PARSING_BACKEND=onnx` и смонтировать модель по `VISION_PARSING_MODEL_PATH` (по умолчанию `/app/models/human_parsing.onnx`). Если модель не примонтирована или не загружается, worker автоматически использует `crop_v1` fallback без остановки пайплайна.

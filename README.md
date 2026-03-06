@@ -215,3 +215,21 @@ docker compose logs -f --tail=200 bot
 docker compose exec redis redis-cli LRANGE queue:jobs 0 -1
 docker compose exec redis redis-cli GET job:<job_id>:status
 ```
+
+
+## Controlled generation: mask-aware patching (PR-12)
+- Для `mode=strict` (или `force_lock=true`) и `scope` из `upper/lower/feet` worker теперь использует mask-aware pipeline: `parse -> mask -> bbox -> edit -> masked composite`.
+- Провайдерский контракт не меняется: провайдер получает обычный `storage_key_person`, только это уже patch-bbox.
+- Если parsing backend не включён/недоступен, выполняется безопасный fallback на `crop_v1` (rectangle lock engine).
+
+### Как включить parsing backend
+1. Смонтировать ONNX-модель в контейнер, например: `/app/models/human_parsing.onnx`.
+2. В `.env` задать:
+   - `VISION_PARSING_BACKEND=onnx`
+   - `VISION_PARSING_MODEL_PATH=/app/models/human_parsing.onnx`
+3. (Опционально) настроить маску:
+   - `VISION_MASK_MARGIN_PX=24`
+   - `VISION_MASK_DILATE_PX=12`
+   - `VISION_MASK_FEATHER_PX=16`
+
+Если файл модели отсутствует или инициализация ONNX не удалась, worker логирует warning и автоматически возвращается к `crop_v1` без падения job.
