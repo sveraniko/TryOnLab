@@ -25,7 +25,7 @@ from app.services.jobs import ensure_user_settings, get_user_photo_for_user, lis
 from app.services.media import validate_image_upload
 from app.services.storage import StorageBackend
 from app.services.storage_keys import user_photo_key
-from app.worker.cleanup import safe_delete
+from app.services.storage_utils import safe_delete
 
 router = APIRouter(tags=['me'])
 
@@ -165,7 +165,7 @@ async def delete_user_photo(
     settings=Depends(get_settings),
 ) -> MeResponse:
     photo = await get_user_photo_for_user(session, user_photo_id=photo_id, user_id=current_user.id)
-    await storage.delete(photo.storage_key)
+    await safe_delete(storage, photo.storage_key)
     photo.deleted_at = func.now()
 
     user_settings = await ensure_user_settings(session, user_id=current_user.id, default_provider=settings.ai_provider_default)
@@ -188,7 +188,7 @@ async def delete_all_user_photos(
         await session.scalars(select(UserPhoto).where(UserPhoto.user_id == current_user.id, UserPhoto.deleted_at.is_(None)))
     )
     for photo in photos:
-        await storage.delete(photo.storage_key)
+        await safe_delete(storage, photo.storage_key)
         photo.deleted_at = func.now()
 
     user_settings = await ensure_user_settings(session, user_id=current_user.id, default_provider=settings.ai_provider_default)
