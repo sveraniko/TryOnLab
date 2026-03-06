@@ -4,7 +4,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from app.worker.cleanup import cleanup_expired_jobs, safe_delete
+from app.services.storage_utils import safe_delete
+from app.worker.cleanup import cleanup_expired_jobs
 
 
 def test_safe_delete_ignores_none_and_errors() -> None:

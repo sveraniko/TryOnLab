@@ -17,6 +17,7 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight test env fallback
         return None
 
 from app.services.storage import StorageBackend
+from app.services.storage_utils import safe_delete
 
 try:
     from app.db.models import Job
@@ -30,14 +31,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-async def safe_delete(storage: StorageBackend, key: str | None) -> None:
-    if not key:
-        return
-    try:
-        await storage.delete(key)
-    except Exception:
-        logger.warning('Failed to delete storage key', extra={'storage_key': key}, exc_info=True)
 
 
 async def cleanup_expired_jobs(
