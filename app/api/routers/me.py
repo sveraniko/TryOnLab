@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 import uuid
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db_session, get_provider_registry, get_settings, get_storage
+from app.api.deps import get_current_user, get_db_session, get_provider_registry, get_redis, get_settings, get_storage
 from app.api.schemas.me import (
     MePatchRequest,
     MeResponse,
@@ -16,12 +19,13 @@ from app.api.schemas.me import (
     UserPhotoListItem,
     UserPhotoListResponse,
 )
-from app.db.models import User, UserPhoto, UserSettings
+from app.db.models import Job, User, UserPhoto, UserSettings
 from app.providers.registry import ProviderRegistry
 from app.services.jobs import ensure_user_settings, get_user_photo_for_user, list_user_photos
 from app.services.media import validate_image_upload
 from app.services.storage import StorageBackend
 from app.services.storage_keys import user_photo_key
+from app.worker.cleanup import safe_delete
 
 router = APIRouter(tags=['me'])
 
@@ -190,6 +194,37 @@ async def delete_all_user_photos(
     user_settings = await ensure_user_settings(session, user_id=current_user.id, default_provider=settings.ai_provider_default)
     user_settings.active_user_photo_id = None
 
+    await session.commit()
+    await session.refresh(current_user)
+    return await _build_me_response(session, current_user)
+
+
+@router.post('/me/purge', response_model=MeResponse)
+async def purge_me(
+    session: AsyncSession = Depends(get_db_session),
+    redis: Redis = Depends(get_redis),
+    storage: StorageBackend = Depends(get_storage),
+    current_user: User = Depends(get_current_user),
+    settings=Depends(get_settings),
+) -> MeResponse:
+    now = datetime.now(timezone.utc)
+    photos = list(await session.scalars(select(UserPhoto).where(UserPhoto.user_id == current_user.id)))
+    for photo in photos:
+        await safe_delete(storage, photo.storage_key)
+        photo.deleted_at = now
+
+    jobs = list(await session.scalars(select(Job).where(Job.user_id == current_user.id)))
+    for job in jobs:
+        await safe_delete(storage, job.product_media_key)
+        await safe_delete(storage, job.user_media_key)
+        await safe_delete(storage, job.result_image_key)
+        await safe_delete(storage, job.result_video_key)
+        job.status = 'expired'
+        await redis.delete(f'job:{job.id}:status')
+
+    user_settings = await ensure_user_settings(session, user_id=current_user.id, default_provider=settings.ai_provider_default)
+    user_settings.active_user_photo_id = None
+    current_user.panel_message_id = None
     await session.commit()
     await session.refresh(current_user)
     return await _build_me_response(session, current_user)

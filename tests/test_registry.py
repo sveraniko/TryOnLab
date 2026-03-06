@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 
 import pytest
 
@@ -46,4 +47,7 @@ def test_default_registry_registers_real_providers_when_keys_exist(tmp_path: Pat
     )
 
     registry = build_default_registry(storage, settings)
-    assert registry.list() == ['dummy', 'grok', 'openai']
+    if importlib.util.find_spec('httpx') is None:
+        assert registry.list() == ['dummy']
+    else:
+        assert registry.list() == ['dummy', 'grok', 'openai']

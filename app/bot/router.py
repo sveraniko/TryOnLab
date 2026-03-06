@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -8,9 +9,11 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, ForceReply, Message
+from redis.asyncio import Redis
 
 from app.bot.api.client import ApiClient
 from app.bot.fsm.states import WizardStates
+from app.bot.services.provider_cache import is_provider_cache_fresh
 from app.bot.services.parser import parse_measurements_text
 from app.bot.ui.panel import ensure_panel, safe_edit_panel, try_delete
 from app.bot.ui.screens import Screen, render
@@ -31,7 +34,16 @@ async def _client(message: Message | CallbackQuery, settings: Settings) -> ApiCl
 async def _render_current(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient, settings: Settings) -> None:
     data = await state.get_data()
     me = await api.get_me()
-    providers = await api.list_providers()
+    panel_message_id = me.get('panel_message_id')
+    if panel_message_id is None:
+        panel_message_id = await ensure_panel(
+            bot,
+            chat_id=chat_id,
+            panel_message_id=None,
+            fallback_text='TryOnLab loading...',
+        )
+        me = await api.patch_me({'panel_message_id': panel_message_id})
+    providers = await _get_cached_providers(state, api, settings)
     pmeta = next((p for p in providers if p['name'] == me['provider']), None)
     screen = Screen(data.get('screen', Screen.HOME.value))
     ctx = {
@@ -48,6 +60,30 @@ async def _render_current(bot: Bot, state: FSMContext, chat_id: int, api: ApiCli
 async def _switch_screen(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient, settings: Settings, screen: Screen) -> None:
     await state.update_data(screen=screen.value)
     await _render_current(bot, state, chat_id, api, settings)
+
+
+async def _get_cached_providers(state: FSMContext, api: ApiClient, settings: Settings) -> list[dict]:
+    data = await state.get_data()
+    cached = data.get('providers_meta_cache')
+    ts = float(data.get('providers_meta_cached_at', 0) or 0)
+    if cached and is_provider_cache_fresh(ts, settings.bot_provider_meta_cache_ttl_seconds):
+        return cached
+
+    providers = await api.list_providers()
+    await state.update_data(providers_meta_cache=providers, providers_meta_cached_at=time.time())
+    return providers
+
+
+async def _consume_rate_limit(*, settings: Settings, tg_user_id: int, action: str, limit: int) -> bool:
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    key = f'rl:user:{tg_user_id}:{action}'
+    try:
+        value = await redis.incr(key)
+        if value == 1:
+            await redis.expire(key, 3600)
+        return value <= limit
+    finally:
+        await redis.aclose()
 
 
 @router.message(Command('start'))
@@ -86,20 +122,20 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
     elif screen == Screen.USER_PHOTO_UPLOAD:
         await state.set_state(WizardStates.await_user_photo_upload)
     elif screen == Screen.MEASUREMENTS:
-        await state.set_state(WizardStates.await_measurements_text)
-        await query.message.answer('Введи параметры текстом.', reply_markup=ForceReply(selective=True))
+        await state.set_state(None)
     else:
         await state.set_state(None)
 
     if screen == Screen.USER_PHOTO_LIST:
-        photos = await api.list_photos(offset=(await state.get_data()).get('photos_offset', 0), limit=9)
+        await state.update_data(photos_offset=0)
+        photos = await api.list_photos(offset=0, limit=9)
         await state.update_data(photo_items=photos['items'])
     if screen == Screen.HISTORY:
         jobs = await api.list_jobs(offset=(await state.get_data()).get('history_offset', 0), limit=10)
         await state.update_data(history_items=jobs['items'])
     if screen == Screen.PROVIDER:
         me = await api.get_me()
-        providers = await api.list_providers()
+        providers = await _get_cached_providers(state, api, settings)
         await state.update_data(providers=[{'name':p['name'], 'current':p['name']==me['provider']} for p in providers])
 
     await _switch_screen(bot, state, query.message.chat.id, api, settings, screen)
@@ -171,8 +207,13 @@ async def set_fit(query: CallbackQuery, state: FSMContext, bot: Bot, settings: S
 
 
 @router.callback_query(F.data == 'measure:input')
-async def measure_input(query: CallbackQuery) -> None:
+async def measure_input(query: CallbackQuery, state: FSMContext) -> None:
     await query.answer('Отправь текст с параметрами')
+    await state.set_state(WizardStates.await_measurements_text)
+    await query.message.answer(
+        'Введи параметры в формате: chest=92, waist=74, hips=98, height_cm=176',
+        reply_markup=ForceReply(selective=True),
+    )
 
 
 @router.callback_query(F.data == 'measure:skip')
@@ -205,6 +246,20 @@ async def on_measurements(message: Message, state: FSMContext, bot: Bot, setting
     await _render_current(bot, state, message.chat.id, api, settings)
 
 
+@router.callback_query(F.data.startswith('photos:'))
+async def photos_pagination(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    api = await _client(query, settings)
+    offset = (await state.get_data()).get('photos_offset', 0)
+    if query.data == 'photos:next':
+        offset += 9
+    elif query.data == 'photos:prev':
+        offset = max(0, offset - 9)
+    photos = await api.list_photos(offset=offset, limit=9)
+    await state.update_data(photos_offset=offset, photo_items=photos['items'], screen=Screen.USER_PHOTO_LIST.value)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
 async def _read_result_bytes(url: str) -> bytes:
     if url.startswith('file://'):
         return Path(url[7:]).read_bytes()
@@ -221,6 +276,10 @@ async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient
         await state.update_data(job_status=data['status'], progress=data.get('progress') or 0)
         await _render_current(bot, state, chat_id, api, settings)
         if data['status'] in {'done', 'failed'}:
+            if media_type == 'image':
+                await state.update_data(last_image_status=data['status'])
+            if media_type == 'video':
+                await state.update_data(last_video_status=data['status'])
             if data['status'] == 'done':
                 if media_type == 'image' and data.get('result_image_url'):
                     content = await _read_result_bytes(data['result_image_url'])
@@ -243,6 +302,14 @@ async def generate_image(query: CallbackQuery, state: FSMContext, bot: Bot, sett
     if not data.get('product_file_id') or not me.get('active_user_photo_id'):
         await query.answer('Нужны product и active user photo', show_alert=True)
         return
+    if not await _consume_rate_limit(
+        settings=settings,
+        tg_user_id=query.from_user.id,
+        action='image',
+        limit=settings.bot_rate_limit_image_per_hour,
+    ):
+        await query.answer('Лимит генераций изображений исчерпан (1ч)', show_alert=True)
+        return
 
     file = await bot.get_file(data['product_file_id'])
     stream = await bot.download_file(file.file_path)
@@ -263,6 +330,14 @@ async def retry_image(query: CallbackQuery, state: FSMContext, bot: Bot, setting
     job_id = (await state.get_data()).get('last_image_job_id')
     if not job_id:
         return
+    if not await _consume_rate_limit(
+        settings=settings,
+        tg_user_id=query.from_user.id,
+        action='retry',
+        limit=settings.bot_rate_limit_retry_per_hour,
+    ):
+        await query.answer('Лимит retry исчерпан (1ч)', show_alert=True)
+        return
     retry = await api.retry_job(job_id)
     await _monitor_job(bot, state, query.message.chat.id, api, settings, retry['job_id'], 'image')
 
@@ -274,6 +349,14 @@ async def generate_video(query: CallbackQuery, state: FSMContext, bot: Bot, sett
     api = await _client(query, settings)
     job_id = (await state.get_data()).get('last_image_job_id')
     if not job_id:
+        return
+    if not await _consume_rate_limit(
+        settings=settings,
+        tg_user_id=query.from_user.id,
+        action='video',
+        limit=settings.bot_rate_limit_video_per_hour,
+    ):
+        await query.answer('Лимит генераций видео исчерпан (1ч)', show_alert=True)
         return
     video_job = await api.create_video(job_id, preset)
     await state.update_data(last_video_job_id=video_job['video_job_id'])
@@ -301,6 +384,20 @@ async def select_provider(query: CallbackQuery, state: FSMContext, bot: Bot, set
 
 @router.callback_query(F.data.startswith('history:'))
 async def history_actions(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    if query.data.startswith('history:job:'):
+        await query.answer()
+        job_id = query.data.split(':', 2)[2]
+        items = (await state.get_data()).get('history_items', [])
+        item = next((row for row in items if row['job_id'] == job_id), None)
+        if item is None:
+            await query.answer('Задача не найдена в текущей странице', show_alert=True)
+            return
+        await query.answer(
+            f'type={item["type"]}\nstatus={item["status"]}\nprovider={item["provider"]}\npreset={item.get("preset") or "—"}',
+            show_alert=True,
+        )
+        return
+
     await query.answer()
     api = await _client(query, settings)
     data = await state.get_data()
@@ -313,3 +410,28 @@ async def history_actions(query: CallbackQuery, state: FSMContext, bot: Bot, set
     jobs = await api.list_jobs(offset=offset, limit=10)
     await state.update_data(history_items=jobs['items'], screen=Screen.HISTORY.value)
     await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'settings:purge')
+async def settings_purge(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.update_data(screen=Screen.PURGE_CONFIRM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'purge:yes')
+async def purge_yes(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Удаляю данные…')
+    api = await _client(query, settings)
+    await api.purge_me()
+    await state.clear()
+    await state.update_data(screen=Screen.HOME.value)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'purge:no')
+async def purge_no(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Отменено')
+    api = await _client(query, settings)
+    await _switch_screen(bot, state, query.message.chat.id, api, settings, Screen.SETTINGS)

@@ -43,6 +43,9 @@ class ApiClient:
     async def delete_all_photos(self) -> dict[str, Any]:
         return await self._request('DELETE', '/me/photos')
 
+    async def purge_me(self) -> dict[str, Any]:
+        return await self._request('POST', '/me/purge')
+
     async def list_providers(self) -> list[dict[str, Any]]:
         return await self._request('GET', '/meta/providers')
 

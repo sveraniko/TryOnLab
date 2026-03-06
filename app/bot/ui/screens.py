@@ -20,6 +20,7 @@ class Screen(StrEnum):
     SETTINGS = 'settings'
     PROVIDER = 'provider'
     HISTORY = 'history'
+    PURGE_CONFIRM = 'purge_confirm'
 
 
 def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -85,7 +86,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
                 current_row = []
         if current_row:
             rows.append(current_row)
-        rows.append([InlineKeyboardButton(text='⬅️', callback_data='history:prev'), InlineKeyboardButton(text='➡️', callback_data='history:next')])
+        rows.append([InlineKeyboardButton(text='⬅️', callback_data='photos:prev'), InlineKeyboardButton(text='➡️', callback_data='photos:next')])
         rows.append([InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:userphoto')])
         return '👤 Моё фото • Список', InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -111,7 +112,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             [InlineKeyboardButton(text='🗑️ Очистить', callback_data='measure:clear')],
             [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
         ])
-        return '📏 Параметры (optional)', kb
+        return '📏 Параметры (optional)\n\nФормат: chest=92, waist=74, hips=98, height_cm=176', kb
 
     if screen == Screen.GENERATE:
         progress = context.get('progress', 0)
@@ -142,6 +143,14 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         rows = [[InlineKeyboardButton(text=f'{"✅ " if p["current"] else ""}{p["name"]}', callback_data=f'provider:{p["name"]}') for p in context.get('providers', [])]]
         rows.append([InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:settings')])
         return '🧠 Провайдер', InlineKeyboardMarkup(inline_keyboard=rows)
+
+    if screen == Screen.PURGE_CONFIRM:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text='✅ Да', callback_data='purge:yes'), InlineKeyboardButton(text='❌ Нет', callback_data='purge:no')]
+            ]
+        )
+        return 'Точно удалить все данные? Это удалит сохранённые фото и историю задач.', kb
 
     if screen == Screen.HISTORY:
         items = context.get('history_items', [])

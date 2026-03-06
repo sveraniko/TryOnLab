@@ -1,4 +1,5 @@
 import io
+import asyncio
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -23,19 +24,17 @@ def test_parse_measurements_json_invalid_raises_422() -> None:
     assert exc.value.status_code == 422
 
 
-@pytest.mark.asyncio
-async def test_validate_image_upload_ok() -> None:
+def test_validate_image_upload_ok() -> None:
     upload = UploadFile(filename='avatar.png', file=io.BytesIO(b'abc123'), headers={'content-type': 'image/png'})
-    payload, content_type, filename = await validate_image_upload(upload, max_mb=1)
+    payload, content_type, filename = asyncio.run(validate_image_upload(upload, max_mb=1))
 
     assert payload == b'abc123'
     assert content_type == 'image/png'
     assert filename == 'avatar.png'
 
 
-@pytest.mark.asyncio
-async def test_validate_image_upload_size_limit() -> None:
+def test_validate_image_upload_size_limit() -> None:
     upload = UploadFile(filename='avatar.png', file=io.BytesIO(b'x' * 10), headers={'content-type': 'image/png'})
     with pytest.raises(HTTPException) as exc:
-        await validate_image_upload(upload, max_mb=0)
+        asyncio.run(validate_image_upload(upload, max_mb=0))
     assert exc.value.status_code == 422
