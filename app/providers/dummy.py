@@ -20,13 +20,18 @@ class DummyProvider(ProviderBase):
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict | None = None,
+        on_progress=None,
     ) -> ProviderResult:
         _ = storage_key_product
         _ = fit_pref
         _ = measurements
+        if on_progress:
+            await on_progress(60)
         person_bytes = await self.storage.get_bytes(storage_key_person)
         output_key = job_key(job_id, 'output', 'image.jpg')
         await self.storage.put_bytes(output_key, person_bytes, content_type='image/jpeg')
+        if on_progress:
+            await on_progress(100)
         return ProviderResult(storage_key=output_key, content_type='image/jpeg', metadata={'dummy': True})
 
     async def generate_video(
@@ -35,6 +40,7 @@ class DummyProvider(ProviderBase):
         job_id: str,
         storage_key_image_result: str,
         preset: int,
+        on_progress=None,
     ) -> ProviderResult:
         _ = job_id
         _ = storage_key_image_result

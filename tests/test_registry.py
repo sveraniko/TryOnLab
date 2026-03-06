@@ -3,7 +3,9 @@ from pathlib import Path
 import pytest
 
 from app.providers.dummy import DummyProvider
+from app.providers import build_default_registry
 from app.providers.registry import ProviderRegistry
+from app.core.config import Settings
 from app.services.storage import LocalStorageBackend
 
 
@@ -21,3 +23,27 @@ def test_registry_get_missing_raises_key_error() -> None:
     registry = ProviderRegistry()
     with pytest.raises(KeyError):
         registry.get('missing')
+
+
+def test_default_registry_has_only_dummy_without_keys(tmp_path: Path) -> None:
+    storage = LocalStorageBackend(root_dir=str(tmp_path))
+    settings = Settings(
+        xai_api_key='',
+        openai_api_key='',
+        ai_provider_allowlist='grok,openai,dummy',
+    )
+
+    registry = build_default_registry(storage, settings)
+    assert registry.list() == ['dummy']
+
+
+def test_default_registry_registers_real_providers_when_keys_exist(tmp_path: Path) -> None:
+    storage = LocalStorageBackend(root_dir=str(tmp_path))
+    settings = Settings(
+        xai_api_key='xai-key',
+        openai_api_key='openai-key',
+        ai_provider_allowlist='grok,openai,dummy',
+    )
+
+    registry = build_default_registry(storage, settings)
+    assert registry.list() == ['dummy', 'grok', 'openai']

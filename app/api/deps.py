@@ -36,7 +36,7 @@ async def get_storage() -> StorageBackend:
 
 @lru_cache(maxsize=1)
 def _get_provider_registry_cached() -> ProviderRegistry:
-    return build_default_registry(_get_storage_cached())
+    return build_default_registry(_get_storage_cached(), get_settings())
 
 
 async def get_provider_registry() -> ProviderRegistry:

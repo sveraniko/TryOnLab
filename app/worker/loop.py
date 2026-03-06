@@ -67,12 +67,26 @@ async def _process_job(
         now = datetime.now(UTC)
         job.status = 'running'
         job.started_at = now
-        job.progress = 1
+        job.progress = 5 if job.type == 'tryon_image' else 10
         await session.commit()
-        await set_job_status(redis, job.id, status='running', progress=1, ttl=settings.job_status_ttl_seconds)
+        await set_job_status(redis, job.id, status='running', progress=job.progress, ttl=settings.job_status_ttl_seconds)
+
+        async def _on_progress(progress: int) -> None:
+            normalized = max(0, min(100, progress))
+            if job.progress == normalized:
+                return
+            job.progress = normalized
+            await session.commit()
+            await set_job_status(
+                redis,
+                job.id,
+                status='running',
+                progress=normalized,
+                ttl=settings.job_status_ttl_seconds,
+            )
 
         try:
-            await execute_job(session, storage, job, registry)
+            await execute_job(session, storage, job, registry, on_progress=_on_progress)
             job.status = 'done'
             job.progress = 100
             job.error_code = None
