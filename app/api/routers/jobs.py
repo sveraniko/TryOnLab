@@ -70,6 +70,14 @@ def _normalize_scope(scope: str | None) -> str:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid scope')
     return value
 
+
+
+def _normalize_force_lock(force_lock: str | None) -> bool:
+    value = (force_lock or '0').strip()
+    if value not in {'0', '1'}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid force_lock')
+    return value == '1'
+
 async def _set_queued_status(redis: Redis, settings: Settings, job_id: uuid.UUID) -> None:
     await set_job_status(redis, job_id, status='queued', progress=0, ttl=settings.job_status_ttl_seconds)
     await redis.rpush(settings.job_queue_key, str(job_id))
@@ -110,6 +118,7 @@ async def create_job(
     provider: str | None = Form(default=None),
     mode: str | None = Form(default=None),
     scope: str | None = Form(default=None),
+    force_lock: str | None = Form(default='0'),
     session: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
     storage: StorageBackend = Depends(get_storage),
@@ -144,6 +153,7 @@ async def create_job(
     measurements = parse_measurements_json(measurements_json)
     normalized_mode = _normalize_mode(mode)
     normalized_scope = _normalize_scope(scope)
+    normalized_force_lock = _normalize_force_lock(force_lock)
 
     user_settings = await ensure_user_settings(
         session, user_id=current_user.id, default_provider=settings.ai_provider_default
@@ -170,7 +180,7 @@ async def create_job(
         fit_pref=fit_pref,
         height_cm=height_cm,
         measurements_json=measurements,
-        inputs_json={"mode": normalized_mode, "scope": normalized_scope},
+        inputs_json={"mode": normalized_mode, "scope": normalized_scope, "force_lock": normalized_force_lock},
     )
     await session.commit()
 

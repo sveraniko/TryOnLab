@@ -79,6 +79,8 @@ def build_tryon_prompt(
     scope: str | None,
     fit_pref: str | None,
     measurements: dict[str, Any] | None,
+    *,
+    force_lock: bool = False,
 ) -> str:
     normalized_mode = (mode or 'strict').strip().lower()
     if normalized_mode not in {'strict', 'creative'}:
@@ -100,6 +102,12 @@ def build_tryon_prompt(
         f'Mode: {normalized_mode}.',
         f'Scope: {normalized_scope}.',
     ]
+
+    if force_lock and normalized_scope != 'full':
+        lines.extend([
+            'Do not change anything outside the edited region.',
+            'Do not add skirt/pants/shoes unless scope demands.',
+        ])
 
     if normalized_mode == 'strict':
         lines.extend(STRICT_SCOPE_RULES[normalized_scope])

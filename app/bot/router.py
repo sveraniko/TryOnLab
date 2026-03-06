@@ -14,10 +14,12 @@ from redis.asyncio import Redis
 from app.bot.api.client import ApiClient
 from app.bot.fsm.states import WizardStates
 from app.bot.services.look_builder import (
+    choose_force_lock,
     choose_person_input,
     new_look_step,
     push_look_step,
     reset_look,
+    resolve_person_image_bytes,
     undo_look_step,
 )
 from app.bot.services.parser import parse_measurements_text
@@ -115,7 +117,7 @@ async def start_handler(message: Message, state: FSMContext, bot: Bot, settings:
     panel_id = await ensure_panel(bot, chat_id=message.chat.id, panel_message_id=me.get('panel_message_id'), fallback_text='TryOnLab loading...')
     if me.get('panel_message_id') != panel_id:
         await api.patch_me({'panel_message_id': panel_id})
-    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full', look_active=False, look_steps=0, look_stack=[])
+    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full', look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_base_job_id=None)
     await _render_current(bot, state, message.chat.id, api, settings)
 
 
@@ -153,7 +155,7 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         await state.set_state(None)
         data = await state.get_data()
         if 'look_stack' not in data:
-            await state.update_data(look_active=False, look_steps=0, look_stack=[])
+            await state.update_data(look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_base_job_id=None)
     else:
         await state.set_state(None)
 
@@ -378,6 +380,7 @@ async def generate_image(query: CallbackQuery, state: FSMContext, bot: Bot, sett
         measurements_json=data.get('measurements_json'),
         mode=data.get('gen_mode', 'strict'),
         scope=data.get('edit_scope', 'full'),
+        force_lock=False,
     )
     await state.update_data(last_image_job_id=job['job_id'], polling_job_id=job['job_id'])
     await _monitor_job(bot, state, query.message.chat.id, api, settings, job['job_id'], 'image')
@@ -487,11 +490,22 @@ async def look_replace_item(query: CallbackQuery, state: FSMContext, bot: Bot, s
 async def look_home(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
     await state.set_state(None)
-    await state.update_data(screen=Screen.LOOK_HOME.value, look_active=True)
+    data = await state.get_data()
+    await state.update_data(screen=Screen.LOOK_HOME.value, look_active=True, look_patch_mode=bool(data.get('look_patch_mode', True)))
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
 
+
+
+@router.callback_query(F.data == 'look:patch_toggle')
+async def look_patch_toggle(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    data = await state.get_data()
+    current = bool(data.get('look_patch_mode', True))
+    await state.update_data(look_patch_mode=not current, screen=Screen.LOOK_HOME.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
 @router.callback_query(F.data == 'look:apply')
 async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
@@ -505,10 +519,10 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
         return
 
     selected_person = choose_person_input(
-        look_base_image_url=data.get('look_base_image_url'),
+        look_base_job_id=data.get('look_base_job_id'),
         active_user_photo_id=me.get('active_user_photo_id'),
     )
-    if selected_person['person_image_url'] is None and selected_person['user_photo_id'] is None:
+    if selected_person['base_job_id'] is None and selected_person['user_photo_id'] is None:
         await query.answer('Нужно active user photo для первого шага', show_alert=True)
         return
 
@@ -525,9 +539,11 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
     prod_stream = await bot.download_file(prod_file.file_path)
     product_bytes = prod_stream.read()
 
-    person_image_bytes = None
-    if selected_person['person_image_url']:
-        person_image_bytes = await _read_result_bytes(selected_person['person_image_url'])
+    person_image_bytes = await resolve_person_image_bytes(
+        api_client=api,
+        base_job_id=selected_person['base_job_id'],
+        read_bytes=_read_result_bytes,
+    )
 
     job = await api.create_job(
         product=product_bytes,
@@ -537,6 +553,7 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
         measurements_json=data.get('measurements_json'),
         mode=data.get('gen_mode', 'strict'),
         scope=item_scope,
+        force_lock=choose_force_lock(data.get('look_patch_mode')),
     )
     await state.update_data(polling_job_id=job['job_id'], job_status='queued', progress=0, screen=Screen.LOOK_MONITOR.value)
     await _render_current(bot, state, query.message.chat.id, api, settings)
@@ -638,7 +655,7 @@ async def look_generate_video(query: CallbackQuery, state: FSMContext, bot: Bot,
 @router.callback_query(F.data == 'session:reset')
 async def reset_session(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full', 'look_active': False, 'look_steps': 0, 'look_stack': []}
+    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full', 'look_active': False, 'look_steps': 0, 'look_stack': [], 'look_patch_mode': True, 'look_base_job_id': None}
     await state.clear()
     await state.update_data(**keep)
     api = await _client(query, settings)

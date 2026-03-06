@@ -22,6 +22,7 @@ class DummyProvider(ProviderBase):
         measurements: dict | None = None,
         mode: str | None = None,
         scope: str | None = None,
+        force_lock: bool = False,
         on_progress=None,
     ) -> ProviderResult:
         _ = storage_key_product
@@ -29,6 +30,7 @@ class DummyProvider(ProviderBase):
         _ = measurements
         _ = mode
         _ = scope
+        _ = force_lock
         if on_progress:
             await on_progress(60)
         person_bytes = await self.storage.get_bytes(storage_key_person)

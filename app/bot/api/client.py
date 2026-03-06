@@ -59,6 +59,7 @@ class ApiClient:
         measurements_json: dict[str, Any] | None,
         mode: str | None,
         scope: str | None,
+        force_lock: bool = False,
     ) -> dict[str, Any]:
         files = {'product_image': ('product.jpg', product, 'image/jpeg')}
         data: dict[str, Any] = {}
@@ -78,6 +79,7 @@ class ApiClient:
             data['mode'] = mode
         if scope:
             data['scope'] = scope
+        data['force_lock'] = '1' if force_lock else '0'
         return await self._request('POST', '/jobs', files=files, data=data)
 
     async def get_job(self, job_id: str) -> dict[str, Any]:

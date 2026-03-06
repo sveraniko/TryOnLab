@@ -23,3 +23,9 @@ def test_build_video_prompt_for_all_presets() -> None:
         prompt = build_video_prompt(preset)
         assert VIDEO_PRESETS[preset] in prompt
         assert 'Generate a short photorealistic video' in prompt
+
+
+def test_build_tryon_prompt_force_lock_adds_hard_constraints() -> None:
+    prompt = build_tryon_prompt('creative', 'upper', 'regular', None, force_lock=True)
+    assert 'Do not change anything outside the edited region.' in prompt
+    assert 'Do not add skirt/pants/shoes unless scope demands.' in prompt

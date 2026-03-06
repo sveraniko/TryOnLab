@@ -71,6 +71,7 @@ class ProviderBase(ABC):
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
+        force_lock: bool = False,
         on_progress: Callable[[int], Awaitable[None]] | None = None,
     ) -> ProviderResult:
         raise NotImplementedError
