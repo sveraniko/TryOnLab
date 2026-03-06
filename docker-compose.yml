@@ -1,18 +1,24 @@
+name: tryonlab
+
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: tryonlab_api
     command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
     env_file:
       - .env
     ports:
-      - '8000:8000'
+      - '8001:8000'
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - storage_data:/app/storage
+    restart: unless-stopped
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://localhost:8000/health || exit 1']
       interval: 10s
@@ -20,17 +26,19 @@ services:
       retries: 5
       start_period: 10s
 
-
   worker:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: tryonlab_worker
     command: python -m app.worker.main
     env_file:
       - .env
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - storage_data:/app/storage
     restart: unless-stopped
@@ -39,47 +47,72 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: tryonlab_bot
     command: python -m app.bot.main
     env_file:
       - .env
     depends_on:
-      - api
-      - postgres
-      - redis
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - storage_data:/app/storage
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
+    container_name: tryonlab_pg
+    restart: unless-stopped
     environment:
       POSTGRES_DB: tryonlab
       POSTGRES_USER: tryonlab
       POSTGRES_PASSWORD: tryonlab
     ports:
-      - '5432:5432'
+      - '5435:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tryonlab -d tryonlab || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7-alpine
+    container_name: tryonlab_redis
+    restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '6382:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   minio:
     image: minio/minio:latest
+    container_name: tryonlab_minio
     profiles: ['storage']
+    restart: unless-stopped
     command: server /data --console-address ':9001'
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - '9004:9000'
+      - '9005:9001'
     volumes:
       - minio_data:/data
 
   minio-mc:
     image: minio/mc:latest
+    container_name: tryonlab_minio_mc
     profiles: ['storage']
     depends_on:
       - minio
@@ -92,5 +125,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   storage_data:
   minio_data:

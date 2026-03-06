@@ -34,6 +34,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         fit = context.get('fit_pref') or '—'
         ms = '✅' if context.get('measurements_json') else '—'
         can_generate = bool(context.get('product_file_id') and active)
+        last_image_status = context.get('last_image_status', '—')
+        has_last_image = last_image_status == 'done' and bool(context.get('last_image_job_id'))
         text = (
             '🧪 TryOnLab • Dashboard\n\n'
             f'🧠 Provider: {provider} (video {video})\n'
@@ -41,10 +43,10 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             f'🧥 Product photo: {product_ok} 1/1\n'
             f'🎯 Fit: {fit}\n'
             f'📏 Measurements: {ms}\n'
-            f'🧾 Last image job: {context.get("last_image_status", "—")} | last video: {context.get("last_video_status", "—")}\n\n'
+            f'🧾 Last image job: {last_image_status} | last video: {context.get("last_video_status", "—")}\n\n'
             f'Generate: {"available ✅" if can_generate else "disabled ❌"}'
         )
-        return text, home_keyboard(can_generate=can_generate)
+        return text, home_keyboard(can_generate=can_generate, has_last_image=has_last_image)
 
     if screen == Screen.PRODUCT:
         ok = '✅ 1/1' if context.get('product_file_id') else '❌ 0/1'
