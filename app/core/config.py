@@ -1,6 +1,17 @@
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ModuleNotFoundError:  # pragma: no cover - lightweight test env fallback
+    class BaseSettings:
+        def __init__(self, **kwargs):
+            for name, value in self.__class__.__dict__.items():
+                if name.startswith('_') or callable(value):
+                    continue
+                setattr(self, name, kwargs.get(name, value))
+
+    def SettingsConfigDict(**kwargs):
+        return kwargs
 
 
 class Settings(BaseSettings):
@@ -17,6 +28,11 @@ class Settings(BaseSettings):
     max_upload_mb: int = 12
     job_queue_key: str = 'queue:jobs'
     job_status_ttl_seconds: int = 3600
+    cleanup_interval_seconds: int = 300
+    bot_rate_limit_image_per_hour: int = 20
+    bot_rate_limit_video_per_hour: int = 10
+    bot_rate_limit_retry_per_hour: int = 20
+    bot_provider_meta_cache_ttl_seconds: int = 60
     ai_provider_default: str = 'dummy'
     ai_provider_allowlist: str = 'grok,openai,dummy'
 
