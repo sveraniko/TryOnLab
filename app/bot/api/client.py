@@ -53,14 +53,21 @@ class ApiClient:
         self,
         *,
         product: bytes,
-        user_photo_id: int,
+        user_photo_id: int | None,
+        person_image: bytes | None = None,
         fit_pref: str | None,
         measurements_json: dict[str, Any] | None,
         mode: str | None,
         scope: str | None,
     ) -> dict[str, Any]:
         files = {'product_image': ('product.jpg', product, 'image/jpeg')}
-        data: dict[str, Any] = {'user_photo_id': str(user_photo_id)}
+        data: dict[str, Any] = {}
+        if person_image is not None:
+            files['person_image'] = ('person.jpg', person_image, 'image/jpeg')
+        elif user_photo_id is not None:
+            data['user_photo_id'] = str(user_photo_id)
+        else:
+            raise ValueError('Either person_image or user_photo_id must be provided')
         if fit_pref:
             data['fit_pref'] = fit_pref
         if measurements_json:

@@ -13,8 +13,15 @@ from redis.asyncio import Redis
 
 from app.bot.api.client import ApiClient
 from app.bot.fsm.states import WizardStates
-from app.bot.services.provider_cache import is_provider_cache_fresh
+from app.bot.services.look_builder import (
+    choose_person_input,
+    new_look_step,
+    push_look_step,
+    reset_look,
+    undo_look_step,
+)
 from app.bot.services.parser import parse_measurements_text
+from app.bot.services.provider_cache import is_provider_cache_fresh
 from app.bot.ui.panel import ensure_panel, safe_edit_panel, try_delete
 from app.bot.ui.screens import Screen, render
 from app.core.config import Settings
@@ -86,6 +93,21 @@ async def _consume_rate_limit(*, settings: Settings, tg_user_id: int, action: st
         await redis.aclose()
 
 
+async def _apply_look_update(state: FSMContext, updater) -> None:
+    data = await state.get_data()
+    next_data = updater(data)
+    await state.update_data(**next_data)
+
+
+async def _read_result_bytes(url: str) -> bytes:
+    if url.startswith('file://'):
+        return Path(url[7:]).read_bytes()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.content
+
+
 @router.message(Command('start'))
 async def start_handler(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     api = await _client(message, settings)
@@ -93,7 +115,7 @@ async def start_handler(message: Message, state: FSMContext, bot: Bot, settings:
     panel_id = await ensure_panel(bot, chat_id=message.chat.id, panel_message_id=me.get('panel_message_id'), fallback_text='TryOnLab loading...')
     if me.get('panel_message_id') != panel_id:
         await api.patch_me({'panel_message_id': panel_id})
-    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full')
+    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full', look_active=False, look_steps=0, look_stack=[])
     await _render_current(bot, state, message.chat.id, api, settings)
 
 
@@ -118,6 +140,7 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         'settings': Screen.SETTINGS,
         'provider': Screen.PROVIDER,
         'history': Screen.HISTORY,
+        'look_home': Screen.LOOK_HOME,
     }
     screen = mapping.get(target, Screen.HOME)
     if screen == Screen.PRODUCT:
@@ -126,6 +149,11 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         await state.set_state(WizardStates.await_user_photo_upload)
     elif screen == Screen.MEASUREMENTS:
         await state.set_state(None)
+    elif screen == Screen.LOOK_HOME:
+        await state.set_state(None)
+        data = await state.get_data()
+        if 'look_stack' not in data:
+            await state.update_data(look_active=False, look_steps=0, look_stack=[])
     else:
         await state.set_state(None)
 
@@ -139,7 +167,7 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
     if screen == Screen.PROVIDER:
         me = await api.get_me()
         providers = await _get_cached_providers(state, api, settings)
-        await state.update_data(providers=[{'name':p['name'], 'current':p['name']==me['provider']} for p in providers])
+        await state.update_data(providers=[{'name': p['name'], 'current': p['name'] == me['provider']} for p in providers])
 
     await _switch_screen(bot, state, query.message.chat.id, api, settings, screen)
 
@@ -156,6 +184,15 @@ async def clear_product(query: CallbackQuery, state: FSMContext, bot: Bot, setti
 async def on_product_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     file_id = message.photo[-1].file_id
     await state.update_data(product_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
+    await try_delete(bot, message.chat.id, message.message_id)
+    api = await _client(message, settings)
+    await _render_current(bot, state, message.chat.id, api, settings)
+
+
+@router.message(WizardStates.await_look_item_photo, F.photo)
+async def on_look_item_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    file_id = message.photo[-1].file_id
+    await state.update_data(look_item_product_file_id=file_id, look_item_scope=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
     await try_delete(bot, message.chat.id, message.message_id)
     api = await _client(message, settings)
     await _render_current(bot, state, message.chat.id, api, settings)
@@ -200,8 +237,6 @@ async def delete_all(query: CallbackQuery, state: FSMContext, bot: Bot, settings
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
 
-
-
 @router.callback_query(F.data.startswith('mode:set:'))
 async def set_mode(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
@@ -226,6 +261,7 @@ async def set_scope(query: CallbackQuery, state: FSMContext, bot: Bot, settings:
     await state.update_data(edit_scope=scope, screen=target_screen)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
+
 
 @router.callback_query(F.data.startswith('fit:'))
 async def set_fit(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
@@ -290,17 +326,9 @@ async def photos_pagination(query: CallbackQuery, state: FSMContext, bot: Bot, s
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
 
-async def _read_result_bytes(url: str) -> bytes:
-    if url.startswith('file://'):
-        return Path(url[7:]).read_bytes()
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.content
-
-
-async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient, settings: Settings, job_id: str, media_type: str) -> None:
-    await state.update_data(screen=Screen.GENERATE.value)
+async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient, settings: Settings, job_id: str, media_type: str, final_screen: Screen = Screen.HOME) -> None:
+    monitor_screen = Screen.GENERATE if final_screen == Screen.HOME else final_screen
+    await state.update_data(screen=monitor_screen.value)
     while True:
         data = await api.get_job(job_id)
         await state.update_data(job_status=data['status'], progress=data.get('progress') or 0)
@@ -319,7 +347,7 @@ async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient
                     await bot.send_video(chat_id, video=BufferedInputFile(content, filename='result.mp4'))
             break
         await asyncio.sleep(2)
-    await state.update_data(screen=Screen.HOME.value)
+    await state.update_data(screen=final_screen.value)
     await _render_current(bot, state, chat_id, api, settings)
 
 
@@ -395,10 +423,222 @@ async def generate_video(query: CallbackQuery, state: FSMContext, bot: Bot, sett
     await _monitor_job(bot, state, query.message.chat.id, api, settings, video_job['video_job_id'], 'video')
 
 
+@router.callback_query(F.data == 'look:add_item')
+async def look_add_item(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.set_state(WizardStates.await_look_item_photo)
+    await state.update_data(screen=Screen.LOOK_ADD_ITEM.value, look_active=True)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:cancel_add')
+async def look_cancel_add(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.set_state(None)
+    await state.update_data(screen=Screen.LOOK_HOME.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:use_session_product')
+async def look_use_session_product(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    data = await state.get_data()
+    if not data.get('product_file_id'):
+        return
+    await state.set_state(None)
+    await state.update_data(look_item_product_file_id=data['product_file_id'], look_item_scope=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:back_add')
+async def look_back_add(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.set_state(WizardStates.await_look_item_photo)
+    await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data.startswith('look:item_scope:'))
+async def look_item_scope(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    scope = query.data.rsplit(':', 1)[1]
+    if scope not in {'upper', 'lower', 'feet', 'full'}:
+        return
+    await state.set_state(None)
+    await state.update_data(look_item_scope=scope, screen=Screen.LOOK_CONFIRM_APPLY.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:replace_item')
+async def look_replace_item(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.set_state(WizardStates.await_look_item_photo)
+    await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:home')
+async def look_home(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.set_state(None)
+    await state.update_data(screen=Screen.LOOK_HOME.value, look_active=True)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:apply')
+async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    api = await _client(query, settings)
+    data = await state.get_data()
+    me = await api.get_me()
+    item_file_id = data.get('look_item_product_file_id')
+    item_scope = data.get('look_item_scope')
+    if not item_file_id or not item_scope:
+        await query.answer('Сначала добавь предмет и выбери Scope', show_alert=True)
+        return
+
+    selected_person = choose_person_input(
+        look_base_image_url=data.get('look_base_image_url'),
+        active_user_photo_id=me.get('active_user_photo_id'),
+    )
+    if selected_person['person_image_url'] is None and selected_person['user_photo_id'] is None:
+        await query.answer('Нужно active user photo для первого шага', show_alert=True)
+        return
+
+    if not await _consume_rate_limit(
+        settings=settings,
+        tg_user_id=query.from_user.id,
+        action='image',
+        limit=settings.bot_rate_limit_image_per_hour,
+    ):
+        await query.answer('Лимит генераций изображений исчерпан (1ч)', show_alert=True)
+        return
+
+    prod_file = await bot.get_file(item_file_id)
+    prod_stream = await bot.download_file(prod_file.file_path)
+    product_bytes = prod_stream.read()
+
+    person_image_bytes = None
+    if selected_person['person_image_url']:
+        person_image_bytes = await _read_result_bytes(selected_person['person_image_url'])
+
+    job = await api.create_job(
+        product=product_bytes,
+        person_image=person_image_bytes,
+        user_photo_id=selected_person['user_photo_id'],
+        fit_pref=data.get('fit_pref'),
+        measurements_json=data.get('measurements_json'),
+        mode=data.get('gen_mode', 'strict'),
+        scope=item_scope,
+    )
+    await state.update_data(polling_job_id=job['job_id'], job_status='queued', progress=0, screen=Screen.LOOK_MONITOR.value)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+    while True:
+        status = await api.get_job(job['job_id'])
+        await state.update_data(job_status=status['status'], progress=status.get('progress') or 0)
+        await _render_current(bot, state, query.message.chat.id, api, settings)
+        if status['status'] in {'done', 'failed'}:
+            if status['status'] == 'done' and status.get('result_image_url'):
+                content = await _read_result_bytes(status['result_image_url'])
+                await bot.send_photo(query.message.chat.id, photo=BufferedInputFile(content, filename='look_result.jpg'))
+                step = new_look_step(
+                    job_id=job['job_id'],
+                    result_image_url=status['result_image_url'],
+                    mode=data.get('gen_mode', 'strict'),
+                    scope=item_scope,
+                    provider=me.get('provider', '—'),
+                )
+                await _apply_look_update(state, lambda d: push_look_step(d, step))
+                await state.update_data(last_image_job_id=job['job_id'], last_image_status='done')
+            break
+        await asyncio.sleep(2)
+
+    await state.update_data(screen=Screen.LOOK_HOME.value)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:undo')
+async def look_undo(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await _apply_look_update(state, undo_look_step)
+    await state.update_data(screen=Screen.LOOK_HOME.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:reset')
+async def look_reset(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await _apply_look_update(state, reset_look)
+    await state.set_state(None)
+    await state.update_data(screen=Screen.LOOK_HOME.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:video_menu')
+async def look_video_menu(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    data = await state.get_data()
+    if not data.get('look_base_job_id'):
+        await query.answer('Нужна текущая база лука', show_alert=True)
+        return
+    await state.update_data(screen=Screen.LOOK_VIDEO_MENU.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data.startswith('look:video:'))
+async def look_generate_video(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    preset = int(query.data.split(':')[-1])
+    data = await state.get_data()
+    base_job_id = data.get('look_base_job_id')
+    if not base_job_id:
+        await query.answer('Нужно получить base через job', show_alert=True)
+        return
+
+    if not await _consume_rate_limit(
+        settings=settings,
+        tg_user_id=query.from_user.id,
+        action='video',
+        limit=settings.bot_rate_limit_video_per_hour,
+    ):
+        await query.answer('Лимит генераций видео исчерпан (1ч)', show_alert=True)
+        return
+
+    api = await _client(query, settings)
+    video_job = await api.create_video(base_job_id, preset)
+    await state.update_data(last_video_job_id=video_job['video_job_id'], polling_job_id=video_job['video_job_id'], screen=Screen.LOOK_MONITOR.value)
+
+    while True:
+        status = await api.get_job(video_job['video_job_id'])
+        await state.update_data(job_status=status['status'], progress=status.get('progress') or 0)
+        await _render_current(bot, state, query.message.chat.id, api, settings)
+        if status['status'] in {'done', 'failed'}:
+            if status['status'] == 'done' and status.get('result_video_url'):
+                content = await _read_result_bytes(status['result_video_url'])
+                await bot.send_video(query.message.chat.id, video=BufferedInputFile(content, filename='look_video.mp4'))
+                await state.update_data(last_video_status='done')
+            break
+        await asyncio.sleep(2)
+
+    await state.update_data(screen=Screen.LOOK_HOME.value)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
 @router.callback_query(F.data == 'session:reset')
 async def reset_session(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full'}
+    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full', 'look_active': False, 'look_steps': 0, 'look_stack': []}
     await state.clear()
     await state.update_data(**keep)
     api = await _client(query, settings)

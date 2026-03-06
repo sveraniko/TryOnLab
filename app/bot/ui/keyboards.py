@@ -11,6 +11,7 @@ def home_keyboard(can_generate: bool, has_last_image: bool = False) -> InlineKey
         [InlineKeyboardButton(text='🧥 Товар', callback_data='nav:product'), InlineKeyboardButton(text='👤 Моё фото', callback_data='nav:userphoto')],
         [InlineKeyboardButton(text='🧩 Режим', callback_data='nav:mode'), InlineKeyboardButton(text='🎛️ Зона', callback_data='nav:scope')],
         [InlineKeyboardButton(text='🎯 Посадка', callback_data='nav:fit'), InlineKeyboardButton(text='📏 Параметры', callback_data='nav:measurements')],
+        [InlineKeyboardButton(text='🧩 Конструктор лука', callback_data='nav:look_home')],
         [gen],
     ]
     if has_last_image:
