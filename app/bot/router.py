@@ -331,8 +331,41 @@ async def photos_pagination(query: CallbackQuery, state: FSMContext, bot: Bot, s
 async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient, settings: Settings, job_id: str, media_type: str, final_screen: Screen = Screen.HOME) -> None:
     monitor_screen = Screen.GENERATE if final_screen == Screen.HOME else final_screen
     await state.update_data(screen=monitor_screen.value)
+    started_at = time.monotonic()
+    poll_interval = max(1, settings.bot_monitor_base_interval_seconds)
+    max_interval = max(poll_interval, settings.bot_monitor_max_interval_seconds)
+    timeout_seconds = max(1, settings.bot_monitor_timeout_seconds)
+
     while True:
-        data = await api.get_job(job_id)
+        if time.monotonic() - started_at > timeout_seconds:
+            status_key = 'last_image_status' if media_type == 'image' else 'last_video_status'
+            await state.update_data(
+                **{status_key: 'failed_timeout'},
+                job_status='failed_timeout',
+                progress=0,
+                monitor_error='⏱ Генерация превысила время ожидания. Проверь историю или попробуй позже.',
+            )
+            await _render_current(bot, state, chat_id, api, settings)
+            break
+
+        try:
+            data = await api.get_job(job_id)
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError):
+            poll_interval = min(max_interval, poll_interval + settings.bot_monitor_base_interval_seconds)
+            await asyncio.sleep(poll_interval)
+            continue
+        except Exception:
+            status_key = 'last_image_status' if media_type == 'image' else 'last_video_status'
+            await state.update_data(
+                **{status_key: 'failed_api'},
+                job_status='failed_api',
+                progress=0,
+                monitor_error='❌ Ошибка связи с сервисом генерации. Попробуй позже.',
+            )
+            await _render_current(bot, state, chat_id, api, settings)
+            break
+
+        poll_interval = max(1, settings.bot_monitor_base_interval_seconds)
         await state.update_data(job_status=data['status'], progress=data.get('progress') or 0)
         await _render_current(bot, state, chat_id, api, settings)
         if data['status'] in {'done', 'failed'}:
@@ -348,8 +381,8 @@ async def _monitor_job(bot: Bot, state: FSMContext, chat_id: int, api: ApiClient
                     content = await _read_result_bytes(data['result_video_url'])
                     await bot.send_video(chat_id, video=BufferedInputFile(content, filename='result.mp4'))
             break
-        await asyncio.sleep(2)
-    await state.update_data(screen=final_screen.value)
+        await asyncio.sleep(poll_interval)
+    await state.update_data(screen=final_screen.value, monitor_error=None)
     await _render_current(bot, state, chat_id, api, settings)
 
 

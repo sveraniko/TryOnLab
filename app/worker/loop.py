@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from redis.asyncio import Redis
@@ -16,8 +17,20 @@ from app.providers.registry import ProviderRegistry
 from app.services.job_status import set_job_status
 from app.services.storage import StorageBackend
 from app.worker.executor import execute_job
+from app.worker.locks import release_lock, renew_lock
 
 logger = logging.getLogger(__name__)
+
+
+async def _lock_heartbeat(
+    *, redis: Redis, key: str, token: str, lease_seconds: int, renew_interval_seconds: int
+) -> None:
+    while True:
+        await asyncio.sleep(renew_interval_seconds)
+        renewed = await renew_lock(redis, key=key, token=token, lease_seconds=lease_seconds)
+        if not renewed:
+            logger.warning('Lost job lock during heartbeat renewal', extra={'lock_key': key})
+            return
 
 
 async def run_worker_loop(
@@ -40,14 +53,33 @@ async def run_worker_loop(
             continue
 
         lock_key = f'lock:job:{job_id}'
-        lock_taken = await redis.set(lock_key, '1', nx=True, ex=300)
+        lock_token = uuid.uuid4().hex
+        lock_taken = await redis.set(
+            lock_key,
+            lock_token,
+            nx=True,
+            ex=settings.worker_lock_lease_seconds,
+        )
         if not lock_taken:
             continue
+
+        heartbeat_task = asyncio.create_task(
+            _lock_heartbeat(
+                redis=redis,
+                key=lock_key,
+                token=lock_token,
+                lease_seconds=settings.worker_lock_lease_seconds,
+                renew_interval_seconds=settings.worker_lock_renew_interval_seconds,
+            )
+        )
 
         try:
             await _process_job(redis=redis, settings=settings, storage=storage, registry=registry, job_id=job_id)
         finally:
-            await redis.delete(lock_key)
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+            await release_lock(redis, key=lock_key, token=lock_token)
 
 
 async def _process_job(

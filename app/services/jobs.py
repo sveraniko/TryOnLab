@@ -154,12 +154,18 @@ async def list_user_photos(
     limit: int,
 ) -> tuple[list[UserPhoto], int]:
     total = await session.scalar(
-        select(func.count(UserPhoto.id)).where(UserPhoto.user_id == user_id)
+        select(func.count(UserPhoto.id)).where(
+            UserPhoto.user_id == user_id,
+            UserPhoto.deleted_at.is_(None),
+        )
     )
     items = list(
         await session.scalars(
             select(UserPhoto)
-            .where(UserPhoto.user_id == user_id)
+            .where(
+                UserPhoto.user_id == user_id,
+                UserPhoto.deleted_at.is_(None),
+            )
             .order_by(UserPhoto.created_at.desc())
             .offset(offset)
             .limit(limit)

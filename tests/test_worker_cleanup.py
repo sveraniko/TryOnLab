@@ -63,3 +63,40 @@ def test_cleanup_expired_jobs_marks_and_deletes() -> None:
     storage.delete.assert_any_await('rv2')
     redis.delete.assert_any_await('job:job-1:status')
     redis.delete.assert_any_await('job:job-2:status')
+
+
+def test_cleanup_expired_jobs_does_not_touch_user_photo_storage_keys() -> None:
+    jobs = [
+        SimpleNamespace(
+            id='job-3',
+            status='done',
+            product_media_key='jobs/product-key',
+            user_media_key='jobs/user-key',
+            result_image_key='jobs/result-image-key',
+            result_video_key='jobs/result-video-key',
+        )
+    ]
+    user_photo_storage_key = 'user_photos/123/77/avatar.jpg'
+
+    class FakeSession:
+        async def scalars(self, _query):
+            return jobs
+
+        async def commit(self):
+            return None
+
+    session = FakeSession()
+    redis = AsyncMock()
+    storage = AsyncMock()
+
+    cleaned = asyncio.run(cleanup_expired_jobs(session=session, redis=redis, storage=storage, limit=100))
+
+    assert cleaned == 1
+    deleted_keys = [call.args[0] for call in storage.delete.await_args_list]
+    assert user_photo_storage_key not in deleted_keys
+    assert set(deleted_keys) == {
+        'jobs/product-key',
+        'jobs/user-key',
+        'jobs/result-image-key',
+        'jobs/result-video-key',
+    }

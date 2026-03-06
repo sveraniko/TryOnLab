@@ -9,7 +9,10 @@ from pathlib import Path
 def pytest_sessionstart(session):
     _ = session
     try:
-        importlib.import_module('fastapi')
+        module = importlib.import_module('fastapi')
+        origin = getattr(module, '__file__', '') or ''
+        if 'tests/stubs/fastapi.py' in origin.replace('\\', '/'):
+            raise RuntimeError('fastapi test stub should not shadow runtime import path')
     except ModuleNotFoundError:
         stub_path = Path(__file__).parent / 'stubs' / 'fastapi.py'
         spec = importlib.util.spec_from_file_location('fastapi', stub_path)
