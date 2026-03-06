@@ -50,11 +50,12 @@ class OpenAIProvider(ProviderBase):
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
+        force_lock: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
         person_bytes = await self.storage.get_bytes(storage_key_person)
         garment_bytes = await self.storage.get_bytes(storage_key_product)
-        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements)
+        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements, force_lock=force_lock)
 
         form_files, form_data = _build_edit_form(
             model=self.settings.openai_image_model,

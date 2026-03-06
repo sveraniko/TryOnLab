@@ -240,16 +240,18 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         mode = (context.get('gen_mode') or 'strict').title()
         scope = (context.get('edit_scope') or 'full').title()
         steps = int(context.get('look_steps') or 0)
-        has_base = bool(context.get('look_base_image_url'))
+        has_base = bool(context.get('look_base_job_id'))
         look_active = bool(context.get('look_active'))
+        patch_mode = bool(context.get('look_patch_mode', True))
         text = (
             '🧩 Конструктор лука\n\n'
             f'Look status: {"active ✅" if look_active else "—"}\n'
             f'Steps: {steps}\n'
             f'Base image: {"✅" if has_base else "❌"}\n'
+            f'Patch mode: {"✅" if patch_mode else "❌"}\n'
             f'Mode/Scope: {mode} / {scope}'
         )
-        kb_rows = [[InlineKeyboardButton(text='➕ Добавить предмет', callback_data='look:add_item')]]
+        kb_rows = [[InlineKeyboardButton(text='🩹 Patch mode', callback_data='look:patch_toggle')], [InlineKeyboardButton(text='➕ Добавить предмет', callback_data='look:add_item')]]
         if steps > 0:
             kb_rows.append([InlineKeyboardButton(text='↩️ Undo', callback_data='look:undo')])
         kb_rows.append([InlineKeyboardButton(text='🧼 Сбросить лук', callback_data='look:reset')])

@@ -31,7 +31,9 @@ async def execute_job(
         mode = _input(job, 'mode', 'strict')
         scope = _input(job, 'scope', 'full')
 
-        if mode == 'strict' and scope != 'full':
+        force_lock = _input_bool(job, 'force_lock', False)
+
+        if scope != 'full' and (mode == 'strict' or force_lock):
             person_bytes = await storage.get_bytes(person_key)
             crop_bytes, crop_rect = _crop_person_bytes(person_bytes, scope)
             crop_key = f'tryon/jobs/{job.id}/tmp/person_crop.jpg'
@@ -45,6 +47,7 @@ async def execute_job(
                 measurements=job.measurements_json,
                 mode=mode,
                 scope=scope,
+                force_lock=force_lock,
                 on_progress=on_progress,
             )
             edited_crop_bytes = await storage.get_bytes(result.storage_key)
@@ -57,6 +60,7 @@ async def execute_job(
                 'mode': mode,
                 'scope': scope,
                 'lock_engine': 'crop_v1',
+                'force_lock': force_lock,
             }
             return
 
@@ -68,6 +72,7 @@ async def execute_job(
             measurements=job.measurements_json,
             mode=mode,
             scope=scope,
+            force_lock=force_lock,
             on_progress=on_progress,
         )
         job.result_image_key = result.storage_key
@@ -127,3 +132,14 @@ def _crop_person_bytes(person_bytes: bytes, scope: str) -> tuple[bytes, tuple[in
     out = BytesIO()
     cropped.save(out, format='JPEG')
     return out.getvalue(), rect
+
+
+def _input_bool(job: Job, key: str, default: bool) -> bool:
+    if not job.inputs_json:
+        return default
+    value = job.inputs_json.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(value)

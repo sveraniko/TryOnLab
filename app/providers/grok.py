@@ -46,6 +46,7 @@ class GrokProvider(ProviderBase):
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
+        force_lock: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
         person_bytes = await self.storage.get_bytes(storage_key_person)
@@ -53,7 +54,7 @@ class GrokProvider(ProviderBase):
 
         person_data_uri = _to_data_uri(storage_key_person, person_bytes)
         garment_data_uri = _to_data_uri(storage_key_product, garment_bytes)
-        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements)
+        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements, force_lock=force_lock)
 
         payload = {
             'model': self.settings.xai_image_model,
