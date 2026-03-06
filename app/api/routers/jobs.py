@@ -8,7 +8,14 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db_session, get_provider_registry, get_redis, get_storage
-from app.api.schemas.jobs import JobCreateResponse, JobRetryResponse, JobStatusResponse, VideoJobCreateResponse
+from app.api.schemas.jobs import (
+    JobCreateResponse,
+    JobListItem,
+    JobListResponse,
+    JobRetryResponse,
+    JobStatusResponse,
+    VideoJobCreateResponse,
+)
 from app.core.config import Settings, get_settings
 from app.db.models import User
 from app.providers.registry import ProviderRegistry
@@ -19,6 +26,7 @@ from app.services.jobs import (
     ensure_user_settings,
     get_job_for_user,
     get_user_photo_for_user,
+    list_jobs_for_user,
     retry_job,
 )
 from app.services.media import parse_measurements_json, validate_image_upload
@@ -52,6 +60,30 @@ async def _set_queued_status(redis: Redis, settings: Settings, job_id: uuid.UUID
     await redis.rpush(settings.job_queue_key, str(job_id))
 
 
+
+
+@router.get('', response_model=JobListResponse)
+async def list_jobs_endpoint(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=50),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
+) -> JobListResponse:
+    items, total = await list_jobs_for_user(session, user_id=current_user.id, offset=offset, limit=limit)
+    return JobListResponse(
+        items=[
+            JobListItem(
+                job_id=item.id,
+                type=item.type,
+                status=item.status,
+                provider=item.provider,
+                preset=item.preset,
+                created_at=item.created_at,
+            )
+            for item in items
+        ],
+        total=total,
+    )
 @router.post('', response_model=JobCreateResponse)
 async def create_job(
     product_image: UploadFile = File(...),

@@ -189,3 +189,29 @@ curl -X POST "http://localhost:8000/jobs/<image_job_id>/video?preset=1" \
 ```bash
 docker compose logs -f --tail=200 worker
 ```
+
+## Bot UX flow (PR-07)
+Бот работает по паттерну **одной панели** (single panel message): все экраны рендерятся в том же сообщении через `edit_message_text` + inline keyboard. Входные фото (товар/человек) удаляются best-effort после успешного сохранения; результаты image/video отправляются отдельными сообщениями и не удаляются.
+
+### Happy-path сценарий
+1. `/start` — создаётся/переиспользуется panel message.
+2. `🧥 Товар` — бот ждёт фото товара, после загрузки ставит ✅.
+3. `👤 Моё фото -> ⬆️ Загрузить новое` — бот ждёт фото человека, сохраняет его, делает active, удаляет входное сообщение.
+4. `🎯 Посадка` — выбор slim/regular/oversize.
+5. `⚡ Генерировать` — создаётся image job, запускается polling, готовая картинка приходит отдельным сообщением.
+6. `🔁 Retry` — повтор генерации image для last job.
+7. `🎬 Видео -> preset 3` — создаётся video job, после `done` видео отправляется отдельным сообщением.
+
+### Запуск и логи
+```bash
+docker compose up -d --build
+docker compose logs -f --tail=200 api
+docker compose logs -f --tail=200 worker
+docker compose logs -f --tail=200 bot
+```
+
+Быстрая проверка очереди/статусов:
+```bash
+docker compose exec redis redis-cli LRANGE queue:jobs 0 -1
+docker compose exec redis redis-cli GET job:<job_id>:status
+```

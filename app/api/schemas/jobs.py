@@ -36,3 +36,17 @@ class JobRetryResponse(BaseModel):
 class VideoJobCreateResponse(BaseModel):
     video_job_id: UUID
     status: str
+
+
+class JobListItem(BaseModel):
+    job_id: UUID
+    type: str
+    status: str
+    provider: str
+    preset: int | None
+    created_at: datetime
+
+
+class JobListResponse(BaseModel):
+    items: list[JobListItem]
+    total: int
