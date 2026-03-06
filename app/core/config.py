@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_env: str = 'dev'
     log_level: str = 'INFO'
     telegram_bot_token: str = ''
+    api_base_url: str = 'http://api:8000'
     database_url: str = 'postgresql+asyncpg://tryonlab:tryonlab@postgres:5432/tryonlab'
     redis_url: str = 'redis://redis:6379/0'
 

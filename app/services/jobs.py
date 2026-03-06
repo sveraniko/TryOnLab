@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, User, UserPhoto, UserSettings
@@ -142,3 +142,45 @@ async def get_user_photo_for_user(session: AsyncSession, user_photo_id: int, use
     if user_photo.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Forbidden')
     return user_photo
+
+
+async def list_user_photos(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    offset: int,
+    limit: int,
+) -> tuple[list[UserPhoto], int]:
+    total = await session.scalar(
+        select(func.count(UserPhoto.id)).where(UserPhoto.user_id == user_id)
+    )
+    items = list(
+        await session.scalars(
+            select(UserPhoto)
+            .where(UserPhoto.user_id == user_id)
+            .order_by(UserPhoto.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return items, int(total or 0)
+
+
+async def list_jobs_for_user(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    offset: int,
+    limit: int,
+) -> tuple[list[Job], int]:
+    total = await session.scalar(select(func.count(Job.id)).where(Job.user_id == user_id))
+    items = list(
+        await session.scalars(
+            select(Job)
+            .where(Job.user_id == user_id)
+            .order_by(Job.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return items, int(total or 0)
