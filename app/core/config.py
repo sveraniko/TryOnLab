@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = 12
     job_queue_key: str = 'queue:jobs'
     job_status_ttl_seconds: int = 3600
+    ai_provider_default: str = 'grok'
+    ai_provider_allowlist: str = 'grok,openai,dummy'
 
     storage_backend: str = 'local'
     storage_local_dir: str = '/app/storage'

@@ -11,6 +11,7 @@ from app.api.deps import get_current_user, get_db_session, get_redis, get_storag
 from app.api.schemas.jobs import JobCreateResponse, JobRetryResponse, JobStatusResponse, VideoJobCreateResponse
 from app.core.config import Settings, get_settings
 from app.db.models import User
+from app.services.job_status import set_job_status
 from app.services.jobs import (
     create_image_job,
     create_video_job,
@@ -26,9 +27,24 @@ from app.services.storage_keys import job_key
 router = APIRouter(prefix='/jobs', tags=['jobs'])
 
 
+def _provider_allowlist(settings: Settings) -> set[str]:
+    values = [item.strip().lower() for item in settings.ai_provider_allowlist.split(',')]
+    return {item for item in values if item}
+
+
+def _validate_provider(provider: str, settings: Settings) -> str:
+    normalized = provider.strip().lower()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider cannot be empty')
+
+    if normalized not in _provider_allowlist(settings):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider is not allowed')
+
+    return normalized
+
+
 async def _set_queued_status(redis: Redis, settings: Settings, job_id: uuid.UUID) -> None:
-    payload = json.dumps({'status': 'queued', 'progress': 0})
-    await redis.setex(f'job:{job_id}:status', settings.job_status_ttl_seconds, payload)
+    await set_job_status(redis, job_id, status='queued', progress=0, ttl=settings.job_status_ttl_seconds)
     await redis.rpush(settings.job_queue_key, str(job_id))
 
 
@@ -73,10 +89,10 @@ async def create_job(
 
     measurements = parse_measurements_json(measurements_json)
 
-    user_settings = await ensure_user_settings(session, user_id=current_user.id)
-    selected_provider = (provider or user_settings.provider).strip()
-    if not selected_provider:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='provider cannot be empty')
+    user_settings = await ensure_user_settings(
+        session, user_id=current_user.id, default_provider=settings.ai_provider_default
+    )
+    selected_provider = _validate_provider(provider or user_settings.provider, settings)
 
     job_id = uuid.uuid4()
     product_key = job_key(job_id, 'input', product_filename)
@@ -175,7 +191,7 @@ async def create_video_job_endpoint(
     video_job = await create_video_job(
         session,
         parent_job=image_job,
-        provider=image_job.provider,
+        provider=_validate_provider(image_job.provider, settings),
         preset=preset,
         retention_hours=settings.retention_hours,
     )

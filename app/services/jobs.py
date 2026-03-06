@@ -25,10 +25,10 @@ async def upsert_user(session: AsyncSession, tg_user_id: int, tg_chat_id: int) -
     return user
 
 
-async def ensure_user_settings(session: AsyncSession, user_id: int) -> UserSettings:
+async def ensure_user_settings(session: AsyncSession, user_id: int, default_provider: str) -> UserSettings:
     settings = await session.scalar(select(UserSettings).where(UserSettings.user_id == user_id))
     if settings is None:
-        settings = UserSettings(user_id=user_id, provider='grok')
+        settings = UserSettings(user_id=user_id, provider=default_provider)
         session.add(settings)
         await session.flush()
     return settings

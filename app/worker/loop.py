@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from datetime import UTC, datetime
+
+from redis.asyncio import Redis
+from sqlalchemy import select
+
+from app.core.config import Settings
+from app.db.models import Job
+from app.db.session import AsyncSessionLocal
+from app.services.job_status import set_job_status
+from app.services.storage import StorageBackend
+from app.worker.executor import ExecutionFailure, execute_job
+
+logger = logging.getLogger(__name__)
+
+
+async def run_worker_loop(redis: Redis, settings: Settings, storage: StorageBackend, shutdown_event: asyncio.Event) -> None:
+    while not shutdown_event.is_set():
+        item = await redis.blpop(settings.job_queue_key, timeout=5)
+        if item is None:
+            continue
+
+        _, raw_job_id = item
+        try:
+            job_id = uuid.UUID(raw_job_id)
+        except ValueError:
+            logger.warning('Skipping invalid job id from queue', extra={'job_id': raw_job_id})
+            continue
+
+        lock_key = f'lock:job:{job_id}'
+        lock_taken = await redis.set(lock_key, '1', nx=True, ex=300)
+        if not lock_taken:
+            continue
+
+        try:
+            await _process_job(redis=redis, settings=settings, storage=storage, job_id=job_id)
+        finally:
+            await redis.delete(lock_key)
+
+
+async def _process_job(redis: Redis, settings: Settings, storage: StorageBackend, job_id: uuid.UUID) -> None:
+    async with AsyncSessionLocal() as session:
+        job = await session.scalar(select(Job).where(Job.id == job_id))
+        if job is None:
+            logger.warning('Job from queue not found in DB', extra={'job_id': str(job_id)})
+            return
+
+        now = datetime.now(UTC)
+        job.status = 'running'
+        job.started_at = now
+        job.progress = 1
+        await session.commit()
+        await set_job_status(redis, job.id, status='running', progress=1, ttl=settings.job_status_ttl_seconds)
+
+        try:
+            await execute_job(session, storage, job)
+            job.status = 'done'
+            job.progress = 100
+            job.error_code = None
+            job.error_message = None
+            job.finished_at = datetime.now(UTC)
+            await session.commit()
+            await set_job_status(redis, job.id, status='done', progress=100, ttl=settings.job_status_ttl_seconds)
+        except ExecutionFailure as exc:
+            job.status = 'failed'
+            job.error_code = exc.error_code
+            job.error_message = exc.error_message
+            job.is_retryable = exc.is_retryable
+            job.finished_at = datetime.now(UTC)
+            await session.commit()
+            await set_job_status(redis, job.id, status='failed', progress=job.progress or 1, ttl=settings.job_status_ttl_seconds)
+        except Exception:
+            logger.exception('Unhandled exception during job processing', extra={'job_id': str(job.id)})
+            job.status = 'failed'
+            job.error_code = 'internal_error'
+            job.error_message = 'Unhandled worker error'
+            job.is_retryable = True
+            job.finished_at = datetime.now(UTC)
+            await session.commit()
+            await set_job_status(redis, job.id, status='failed', progress=job.progress or 1, ttl=settings.job_status_ttl_seconds)
