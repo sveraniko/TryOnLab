@@ -32,7 +32,7 @@ async def _run() -> None:
 
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     storage = create_storage(settings)
-    registry = build_default_registry(storage)
+    registry = build_default_registry(storage, settings)
 
     try:
         logger.info('Worker started')

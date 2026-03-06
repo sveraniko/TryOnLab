@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 
 @dataclass
@@ -69,6 +69,7 @@ class ProviderBase(ABC):
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
+        on_progress: Callable[[int], Awaitable[None]] | None = None,
     ) -> ProviderResult:
         raise NotImplementedError
 
@@ -78,5 +79,6 @@ class ProviderBase(ABC):
         job_id: str,
         storage_key_image_result: str,
         preset: int,
+        on_progress: Callable[[int], Awaitable[None]] | None = None,
     ) -> ProviderResult:
         raise NotImplementedError

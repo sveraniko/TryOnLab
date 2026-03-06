@@ -146,3 +146,46 @@ curl -X POST http://localhost:8000/jobs \
 docker compose exec redis redis-cli LRANGE queue:jobs 0 -1
 docker compose exec redis redis-cli GET job:<job_id>:status
 ```
+
+## Providers (PR-06): Grok/xAI + OpenAI
+- Включение провайдеров делается через `.env` и `AI_PROVIDER_ALLOWLIST`.
+- Провайдер регистрируется только когда задан API key.
+
+Минимум для Grok:
+```env
+XAI_API_KEY=
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_IMAGE_MODEL=grok-imagine-image
+XAI_VIDEO_MODEL=grok-imagine-video
+```
+
+Минимум для OpenAI:
+```env
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_IMAGE_MODEL=gpt-image-1
+OPENAI_VIDEO_MODEL=sora-2
+```
+
+Пример create image job с Grok:
+```bash
+curl -X POST http://localhost:8000/jobs \
+  -H "X-TG-User-Id: 12345" \
+  -H "X-TG-Chat-Id: 12345" \
+  -F "provider=grok" \
+  -F "product_image=@./examples/product.jpg" \
+  -F "person_image=@./examples/person.jpg" \
+  -F "fit_pref=regular"
+```
+
+Пример create video job (preset=1) после `done` image job:
+```bash
+curl -X POST "http://localhost:8000/jobs/<image_job_id>/video?preset=1" \
+  -H "X-TG-User-Id: 12345" \
+  -H "X-TG-Chat-Id: 12345"
+```
+
+Логи worker:
+```bash
+docker compose logs -f --tail=200 worker
+```

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,7 @@ async def execute_job(
     storage: StorageBackend,
     job: Job,
     registry: ProviderRegistry,
+    on_progress: Callable[[int], Awaitable[None]] | None = None,
 ) -> None:
     provider = registry.get(job.provider)
 
@@ -28,6 +31,7 @@ async def execute_job(
             storage_key_person=person_key,
             fit_pref=job.fit_pref,
             measurements=job.measurements_json,
+            on_progress=on_progress,
         )
         job.result_image_key = result.storage_key
         job.result_json = result.metadata
@@ -39,6 +43,7 @@ async def execute_job(
             job_id=str(job.id),
             storage_key_image_result=source_image_key,
             preset=job.preset or 1,
+            on_progress=on_progress,
         )
         job.result_video_key = result.storage_key
         job.result_json = result.metadata
