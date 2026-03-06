@@ -1,98 +1,14 @@
-tryonlab/
+# Документация TryOnLab
 
-&nbsp; README.md
+Индекс документации в папке `docs/`.
 
-&nbsp; docker-compose.yml
-
-&nbsp; .env.example
-
-&nbsp; requirements.txt
-
-&nbsp; alembic.ini
-
-&nbsp; app/
-
-&nbsp;   api/
-
-&nbsp;     main.py
-
-&nbsp;     routers/
-
-&nbsp;       health.py
-
-&nbsp;       jobs.py
-
-&nbsp;     deps.py
-
-&nbsp;   bot/
-
-&nbsp;     main.py
-
-&nbsp;     wizard.py
-
-&nbsp;     keyboards.py
-
-&nbsp;     states.py
-
-&nbsp;   core/
-
-&nbsp;     config.py
-
-&nbsp;     logging.py
-
-&nbsp;     constants.py
-
-&nbsp;   db/
-
-&nbsp;     base.py
-
-&nbsp;     models.py
-
-&nbsp;     session.py
-
-&nbsp;     migrations/   # alembic
-
-&nbsp;   providers/
-
-&nbsp;     base.py
-
-&nbsp;     registry.py
-
-&nbsp;     grok.py
-
-&nbsp;     openai.py
-
-&nbsp;   services/
-
-&nbsp;     jobs.py
-
-&nbsp;     storage.py
-
-&nbsp;     prompts.py
-
-&nbsp;     media.py
-
-&nbsp; docs/
-
-&nbsp;   00\_overview.md
-
-&nbsp;   10\_architecture.md
-
-&nbsp;   20\_bot\_flow.md
-
-&nbsp;   30\_providers.md
-
-&nbsp;   40\_prompts.md
-
-&nbsp;   50\_data\_model.md
-
-&nbsp;   60\_ops.md
-
-&nbsp;   70\_security\_privacy.md
-
-&nbsp;   80\_backlog.md
-
-&nbsp;   90\_testing.md
-
-
-
+- `docs/00_overview.md` — продуктовая цель проекта, MVP-границы и roadmap по PR-стеку.
+- `docs/10_architecture.md` — целевая архитектура, слои приложения, runtime-компоненты, API/high-level data flow.
+- `docs/20_bot_flow.md` — UX и сценарии Telegram-бота, wizard-flow, panel pattern, callback policy.
+- `docs/30_providers.md` — контракт провайдеров, capabilities, ошибки, интеграционные нюансы.
+- `docs/40_prompts.md` — промпт-стратегия для try-on и видео пресетов.
+- `docs/50_data_model.md` — структура данных (БД/Redis), сущности и ключи.
+- `docs/60_ops.md` — эксплуатация, логирование, деплой, окружения.
+- `docs/70_security_privacy.md` — приватность, хранение и удаление медиа.
+- `docs/80_backlog.md` — backlog/идеи для следующих этапов.
+- `docs/90_testing.md` — стратегия тестирования и критерии качества.
