@@ -36,6 +36,7 @@ async def get_current_user(
     db_session: AsyncSession = Depends(get_db_session),
     x_tg_user_id: str | None = Header(default=None, alias='X-TG-User-Id'),
     x_tg_chat_id: str | None = Header(default=None, alias='X-TG-Chat-Id'),
+    settings: Settings = Depends(get_settings),
 ):
     if not x_tg_user_id:
         raise HTTPException(
@@ -63,7 +64,7 @@ async def get_current_user(
             ) from exc
 
     user = await upsert_user(db_session, tg_user_id=tg_user_id, tg_chat_id=tg_chat_id)
-    await ensure_user_settings(db_session, user_id=user.id)
+    await ensure_user_settings(db_session, user_id=user.id, default_provider=settings.ai_provider_default)
     await db_session.commit()
     await db_session.refresh(user)
     return user

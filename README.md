@@ -118,3 +118,31 @@ curl -X POST http://localhost:8000/jobs
 curl http://localhost:8000/jobs/<job_id>
   -H "X-TG-User-Id: 12345"
 ```
+
+
+## Worker и очередь (PR-04)
+- Worker запускается отдельным сервисом в compose: `python -m app.worker.main`.
+- Общий запуск всех сервисов:
+  ```bash
+  docker compose up -d --build
+  ```
+- Логи worker:
+  ```bash
+  docker compose logs -f --tail=200 worker
+  ```
+
+Пример создания тестового job с dummy provider:
+```bash
+curl -X POST http://localhost:8000/jobs \
+  -H "X-TG-User-Id: 12345" \
+  -H "X-TG-Chat-Id: 12345" \
+  -F "provider=dummy" \
+  -F "product_image=@./examples/product.jpg" \
+  -F "person_image=@./examples/person.jpg"
+```
+
+Микро-проверка очереди/статуса в Redis:
+```bash
+docker compose exec redis redis-cli LRANGE queue:jobs 0 -1
+docker compose exec redis redis-cli GET job:<job_id>:status
+```
