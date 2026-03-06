@@ -24,3 +24,13 @@ def test_local_storage_path_traversal_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(StorageError):
         asyncio.run(storage.put_bytes('../x', b'bad'))
+
+
+def test_local_storage_empty_key_rejected(tmp_path: Path) -> None:
+    storage = LocalStorageBackend(root_dir=str(tmp_path))
+
+    with pytest.raises(StorageError):
+        asyncio.run(storage.put_bytes('   ', b'bad'))
+
+    with pytest.raises(StorageError):
+        asyncio.run(storage.put_bytes('./', b'bad'))

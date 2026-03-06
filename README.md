@@ -89,3 +89,32 @@ tryonlab/
 ## Что будет в PR-01+
 - Начиная с PR-01, перед первым запуском API нужно выполнить `alembic upgrade head` внутри контейнера `api`.
 - Jobs API, очередь и worker — в следующих PR по плану.
+
+
+## Jobs API (PR-03)
+Для прототипа V1 API использует header-идентификацию:
+- `X-TG-User-Id` (обязательный)
+- `X-TG-Chat-Id` (опциональный, если нет — используется `X-TG-User-Id`)
+
+Endpoints:
+- `POST /jobs` — создать image job (входные файлы сохраняются в storage, job уходит в Redis очередь).
+- `GET /jobs/{job_id}` — получить статус job (owner-check по `X-TG-User-Id`).
+- `POST /jobs/{job_id}/retry` — ретрай для job.
+- `POST /jobs/{job_id}/video?preset=1..5` — создать video job на основе готового image job.
+
+Пример создания image job:
+```bash
+curl -X POST http://localhost:8000/jobs
+  -H "X-TG-User-Id: 12345"
+  -H "X-TG-Chat-Id: 12345"
+  -F "product_image=@./examples/product.jpg"
+  -F "person_image=@./examples/person.jpg"
+  -F "fit_pref=regular"
+  -F 'measurements_json={"chest":92,"waist":74}'
+```
+
+Пример polling статуса:
+```bash
+curl http://localhost:8000/jobs/<job_id>
+  -H "X-TG-User-Id: 12345"
+```

@@ -43,7 +43,11 @@ class LocalStorageBackend:
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_key_path(self, key: str) -> Path:
-        candidate = Path(key)
+        normalized = key.strip()
+        if not normalized or normalized in {'.', './'}:
+            raise StorageError('Storage key must be a non-empty relative path')
+
+        candidate = Path(normalized)
         if candidate.is_absolute():
             raise StorageError('Storage key must be a relative path')
 
