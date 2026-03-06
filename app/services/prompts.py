@@ -2,18 +2,60 @@ from __future__ import annotations
 
 from typing import Any
 
-SYSTEM_RULES = (
-    'You are an image editing assistant. '\
-    'Goal: keep the person photo unchanged (identity, face, hair, body shape, pose, background). '\
-    'Replace only the clothing with the garment from the product photo. '\
-    'Photorealistic. No text, no logos, no watermark. No extra accessories. '\
-    'Do not change skin tone or facial features. Preserve original lighting direction.'
+PROMPT_VERSION = 'pr09.v1'
+
+BASE_IDENTITY_RULES = (
+    'Keep identity and scene fixed: preserve face, hair, body shape, pose, hands, and background. '
+    'No text, logos, or watermarks. Photorealistic output only.'
 )
 
 FIT_DIRECTIVES: dict[str, str] = {
     'slim': 'Fit preference: slim; slightly closer fit but realistic.',
     'regular': 'Fit preference: regular; natural fit.',
     'oversize': 'Fit preference: oversize; slightly looser fit but realistic.',
+}
+
+STRICT_SCOPE_RULES: dict[str, list[str]] = {
+    'upper': [
+        'Edit scope: upper body only (tops, jackets, coats).',
+        'Keep the original outfit unchanged outside the edited region.',
+        'Do NOT change shorts, pants, skirt, legs, or shoes.',
+        'Do NOT add a skirt.',
+    ],
+    'lower': [
+        'Edit scope: lower body only (pants, skirts, shorts).',
+        'Keep the original outfit unchanged outside the edited region.',
+        'Do NOT change top, jacket, arms, or upper-body clothing.',
+        'Do NOT change shoes unless scope is feet.',
+    ],
+    'feet': [
+        'Edit scope: feet only (shoes and socks area).',
+        'Keep the original outfit unchanged outside the edited region.',
+        'Do NOT change clothing outside shoes/socks area.',
+        'Only change shoes/socks area.',
+    ],
+    'full': [
+        'Edit scope: full body clothing edit.',
+        'Preserve identity and background; do not alter anatomy unrealistically.',
+    ],
+}
+
+CREATIVE_SCOPE_RULES: dict[str, list[str]] = {
+    'upper': [
+        'Creative mode: build a harmonious outfit around the product.',
+        'You may adapt lower garments and shoes to match the style.',
+    ],
+    'lower': [
+        'Creative mode: build a harmonious outfit around the product.',
+        'You may adapt top layers and shoes to match the style.',
+    ],
+    'feet': [
+        'Creative mode: build a harmonious outfit around the footwear.',
+        'Minor outfit coordination is allowed while preserving identity and scene.',
+    ],
+    'full': [
+        'Creative mode: style a coherent full look around the product.',
+    ],
 }
 
 VIDEO_SYSTEM_RULES = (
@@ -31,23 +73,44 @@ VIDEO_PRESETS: dict[int, str] = {
     5: 'Very subtle body sway and weight shift to show how the fabric drapes. No big gestures. Keep the garment texture and seams crisp, no distortions.',
 }
 
-PROMPT_VERSION = 'pr06.v1'
 
+def build_tryon_prompt(
+    mode: str | None,
+    scope: str | None,
+    fit_pref: str | None,
+    measurements: dict[str, Any] | None,
+) -> str:
+    normalized_mode = (mode or 'strict').strip().lower()
+    if normalized_mode not in {'strict', 'creative'}:
+        normalized_mode = 'strict'
 
-def build_tryon_prompt(fit_pref: str | None, measurements: dict[str, Any] | None) -> str:
+    normalized_scope = (scope or 'full').strip().lower()
+    if normalized_scope not in {'upper', 'lower', 'feet', 'full'}:
+        normalized_scope = 'full'
+
     fit_value = (fit_pref or 'regular').strip().lower()
     fit_line = FIT_DIRECTIVES.get(fit_value, FIT_DIRECTIVES['regular'])
 
     lines = [
-        SYSTEM_RULES,
-        'Use PERSON_IMAGE as the base image.',
-        'Put the clothing from GARMENT_IMAGE onto the person.',
-        "Match the garment's exact color, pattern, texture, and silhouette.",
+        BASE_IDENTITY_RULES,
+        'Use PERSON_IMAGE as base.',
+        'Use GARMENT_IMAGE as product reference.',
+        "Match product color, texture, silhouette, and key details as realistically as possible.",
         fit_line,
-        'Keep: face, hair, body proportions, pose, hands, background.',
-        'Change only: the clothing area needed to wear the garment.',
-        'Add realistic fabric folds and seams. Keep the photo natural.',
+        f'Mode: {normalized_mode}.',
+        f'Scope: {normalized_scope}.',
     ]
+
+    if normalized_mode == 'strict':
+        lines.extend(STRICT_SCOPE_RULES[normalized_scope])
+    else:
+        lines.extend(
+            [
+                'Allow tasteful styling for a harmonious outfit while preserving identity and scene.',
+                'Face, hair, pose, and background must remain unchanged.',
+            ]
+        )
+        lines.extend(CREATIVE_SCOPE_RULES[normalized_scope])
 
     compact = _compact_measurements(measurements)
     if compact:

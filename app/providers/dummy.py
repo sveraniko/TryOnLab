@@ -20,11 +20,15 @@ class DummyProvider(ProviderBase):
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict | None = None,
+        mode: str | None = None,
+        scope: str | None = None,
         on_progress=None,
     ) -> ProviderResult:
         _ = storage_key_product
         _ = fit_pref
         _ = measurements
+        _ = mode
+        _ = scope
         if on_progress:
             await on_progress(60)
         person_bytes = await self.storage.get_bytes(storage_key_person)

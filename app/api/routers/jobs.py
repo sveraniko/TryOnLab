@@ -55,6 +55,21 @@ def _validate_provider(provider: str, settings: Settings, registry: ProviderRegi
     return normalized
 
 
+
+
+def _normalize_mode(mode: str | None) -> str:
+    value = (mode or 'strict').strip().lower()
+    if value not in {'strict', 'creative'}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid mode')
+    return value
+
+
+def _normalize_scope(scope: str | None) -> str:
+    value = (scope or 'full').strip().lower()
+    if value not in {'upper', 'lower', 'feet', 'full'}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid scope')
+    return value
+
 async def _set_queued_status(redis: Redis, settings: Settings, job_id: uuid.UUID) -> None:
     await set_job_status(redis, job_id, status='queued', progress=0, ttl=settings.job_status_ttl_seconds)
     await redis.rpush(settings.job_queue_key, str(job_id))
@@ -93,6 +108,8 @@ async def create_job(
     height_cm: int | None = Form(default=None),
     measurements_json: str | None = Form(default=None),
     provider: str | None = Form(default=None),
+    mode: str | None = Form(default=None),
+    scope: str | None = Form(default=None),
     session: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
     storage: StorageBackend = Depends(get_storage),
@@ -125,6 +142,8 @@ async def create_job(
         validated_user_photo_id = user_photo_id
 
     measurements = parse_measurements_json(measurements_json)
+    normalized_mode = _normalize_mode(mode)
+    normalized_scope = _normalize_scope(scope)
 
     user_settings = await ensure_user_settings(
         session, user_id=current_user.id, default_provider=settings.ai_provider_default
@@ -151,6 +170,7 @@ async def create_job(
         fit_pref=fit_pref,
         height_cm=height_cm,
         measurements_json=measurements,
+        inputs_json={"mode": normalized_mode, "scope": normalized_scope},
     )
     await session.commit()
 

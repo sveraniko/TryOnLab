@@ -56,6 +56,8 @@ class ApiClient:
         user_photo_id: int,
         fit_pref: str | None,
         measurements_json: dict[str, Any] | None,
+        mode: str | None,
+        scope: str | None,
     ) -> dict[str, Any]:
         files = {'product_image': ('product.jpg', product, 'image/jpeg')}
         data: dict[str, Any] = {'user_photo_id': str(user_photo_id)}
@@ -65,6 +67,10 @@ class ApiClient:
             import json
 
             data['measurements_json'] = json.dumps(measurements_json)
+        if mode:
+            data['mode'] = mode
+        if scope:
+            data['scope'] = scope
         return await self._request('POST', '/jobs', files=files, data=data)
 
     async def get_job(self, job_id: str) -> dict[str, Any]:

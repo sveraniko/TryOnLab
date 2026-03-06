@@ -69,6 +69,8 @@ class ProviderBase(ABC):
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
+        mode: str | None = None,
+        scope: str | None = None,
         on_progress: Callable[[int], Awaitable[None]] | None = None,
     ) -> ProviderResult:
         raise NotImplementedError

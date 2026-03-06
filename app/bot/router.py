@@ -93,7 +93,7 @@ async def start_handler(message: Message, state: FSMContext, bot: Bot, settings:
     panel_id = await ensure_panel(bot, chat_id=message.chat.id, panel_message_id=me.get('panel_message_id'), fallback_text='TryOnLab loading...')
     if me.get('panel_message_id') != panel_id:
         await api.patch_me({'panel_message_id': panel_id})
-    await state.update_data(screen=Screen.HOME.value)
+    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full')
     await _render_current(bot, state, message.chat.id, api, settings)
 
 
@@ -109,6 +109,9 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         'user_photo_list': Screen.USER_PHOTO_LIST,
         'user_photo_upload': Screen.USER_PHOTO_UPLOAD,
         'fit': Screen.FIT,
+        'mode': Screen.MODE,
+        'scope': Screen.SCOPE,
+        'product_scope': Screen.PRODUCT_SCOPE,
         'measurements': Screen.MEASUREMENTS,
         'generate': Screen.GENERATE,
         'video': Screen.VIDEO_MENU,
@@ -152,7 +155,7 @@ async def clear_product(query: CallbackQuery, state: FSMContext, bot: Bot, setti
 @router.message(WizardStates.await_product_photo, F.photo)
 async def on_product_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     file_id = message.photo[-1].file_id
-    await state.update_data(product_file_id=file_id, screen=Screen.HOME.value)
+    await state.update_data(product_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
     await try_delete(bot, message.chat.id, message.message_id)
     api = await _client(message, settings)
     await _render_current(bot, state, message.chat.id, api, settings)
@@ -196,6 +199,33 @@ async def delete_all(query: CallbackQuery, state: FSMContext, bot: Bot, settings
     await api.delete_all_photos()
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
+
+
+
+@router.callback_query(F.data.startswith('mode:set:'))
+async def set_mode(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    mode = query.data.rsplit(':', 1)[1]
+    if mode not in {'strict', 'creative'}:
+        return
+    await state.update_data(gen_mode=mode, screen=Screen.HOME.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data.startswith('scope:set:'))
+async def set_scope(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    scope = query.data.rsplit(':', 1)[1]
+    if scope not in {'upper', 'lower', 'feet', 'full'}:
+        return
+    current = await state.get_data()
+    target_screen = Screen.HOME.value
+    if current.get('screen') in {Screen.SCOPE.value, Screen.PRODUCT_SCOPE.value}:
+        target_screen = current.get('screen')
+    await state.update_data(edit_scope=scope, screen=target_screen)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
 
 @router.callback_query(F.data.startswith('fit:'))
 async def set_fit(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
@@ -318,6 +348,8 @@ async def generate_image(query: CallbackQuery, state: FSMContext, bot: Bot, sett
         user_photo_id=me['active_user_photo_id'],
         fit_pref=data.get('fit_pref'),
         measurements_json=data.get('measurements_json'),
+        mode=data.get('gen_mode', 'strict'),
+        scope=data.get('edit_scope', 'full'),
     )
     await state.update_data(last_image_job_id=job['job_id'], polling_job_id=job['job_id'])
     await _monitor_job(bot, state, query.message.chat.id, api, settings, job['job_id'], 'image')
@@ -366,7 +398,7 @@ async def generate_video(query: CallbackQuery, state: FSMContext, bot: Bot, sett
 @router.callback_query(F.data == 'session:reset')
 async def reset_session(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    keep = {'screen': Screen.HOME.value}
+    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full'}
     await state.clear()
     await state.update_data(**keep)
     api = await _client(query, settings)
