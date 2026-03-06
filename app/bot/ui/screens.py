@@ -185,6 +185,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
 
     if screen == Screen.GENERATE:
         progress = context.get('progress', 0)
+        monitor_error = context.get('monitor_error')
         bar_full = max(0, min(10, progress // 10))
         bar = '█' * bar_full + '░' * (10 - bar_full)
         rows = [[InlineKeyboardButton(text='🧾 История', callback_data='nav:history'), InlineKeyboardButton(text='⚙️ Настройки', callback_data='nav:settings')]]
@@ -192,6 +193,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             rows.insert(0, [InlineKeyboardButton(text='🔁 Retry', callback_data='gen:retry'), InlineKeyboardButton(text='🎬 Видео', callback_data='nav:video')])
         rows.append([InlineKeyboardButton(text='⬅️ Dashboard', callback_data='nav:home')])
         text = f'⚡ Генерация\n\nStatus: {context.get("job_status", "queued")} {progress}%\n[{bar}]'
+        if monitor_error:
+            text = f'{text}\n\n{monitor_error}'
         return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
     if screen == Screen.VIDEO_MENU:

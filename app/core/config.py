@@ -28,11 +28,16 @@ class Settings(BaseSettings):
     max_upload_mb: int = 12
     job_queue_key: str = 'queue:jobs'
     job_status_ttl_seconds: int = 3600
+    worker_lock_lease_seconds: int = 300
+    worker_lock_renew_interval_seconds: int = 60
     cleanup_interval_seconds: int = 300
     bot_rate_limit_image_per_hour: int = 20
     bot_rate_limit_video_per_hour: int = 10
     bot_rate_limit_retry_per_hour: int = 20
     bot_provider_meta_cache_ttl_seconds: int = 60
+    bot_monitor_base_interval_seconds: int = 2
+    bot_monitor_max_interval_seconds: int = 8
+    bot_monitor_timeout_seconds: int = 600
     ai_provider_default: str = 'dummy'
     ai_provider_allowlist: str = 'grok,openai,dummy'
 

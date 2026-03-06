@@ -34,6 +34,13 @@ async def _build_me_response(session: AsyncSession, user: User) -> MeResponse:
     user_settings = await session.scalar(select(UserSettings).where(UserSettings.user_id == user.id))
     provider = user_settings.provider if user_settings else 'unknown'
     active_user_photo_id = user_settings.active_user_photo_id if user_settings else None
+    if active_user_photo_id is not None:
+        active_photo = await session.scalar(select(UserPhoto).where(UserPhoto.id == active_user_photo_id))
+        if active_photo is None or active_photo.deleted_at is not None:
+            active_user_photo_id = None
+            if user_settings is not None:
+                user_settings.active_user_photo_id = None
+                await session.commit()
     stored_count = await session.scalar(
         select(func.count(UserPhoto.id)).where(UserPhoto.user_id == user.id, UserPhoto.deleted_at.is_(None))
     )
