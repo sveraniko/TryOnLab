@@ -5,7 +5,7 @@ PR-00 (bootstrap) для проекта виртуальной примерки 
 ## Что входит в PR-00
 - FastAPI каркас с endpoint `/health`.
 - aiogram bot каркас с командами `/start` и `/help`.
-- Docker Compose окружение: `api`, `bot`, `postgres`, `redis` (+ optional `minio` в комментариях).
+- Docker Compose окружение: `api`, `bot`, `postgres`, `redis` (+ optional `minio` profile).
 - Базовая конфигурация через `.env`.
 - Подготовленная структура каталогов под следующие PR-01..PR-08.
 
@@ -60,6 +60,18 @@ tryonlab/
    docker compose logs -f api
    docker compose logs -f bot
    ```
+
+## Storage
+- По умолчанию используется локальное хранилище (`STORAGE_BACKEND=local`) в `STORAGE_LOCAL_DIR`.
+- Для MinIO/S3 включите storage-профиль:
+  ```bash
+  docker compose --profile storage up -d --build
+  ```
+- Для S3/MinIO задайте переменные: `STORAGE_S3_ENDPOINT`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ACCESS_KEY`, `STORAGE_S3_SECRET_KEY`.
+- Manual check для S3 backend:
+  1. Запустить MinIO profile и убедиться, что бакет `tryonlab` создан (`minio-mc`).
+  2. Установить `STORAGE_BACKEND=s3` в `.env`.
+  3. Выполнить локальные тесты `pytest -q` (покрывают local backend), затем вручную проверить put/get/delete через shell или интеграционный сценарий API/worker.
 
 ## ENV (минимум для PR-00)
 - `APP_ENV`
