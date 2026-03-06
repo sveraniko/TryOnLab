@@ -47,6 +47,7 @@ async def create_image_job(
     fit_pref: str | None,
     height_cm: int | None,
     measurements_json: dict | None,
+    inputs_json: dict | None = None,
 ) -> Job:
     expires_at = datetime.now(UTC) + timedelta(hours=retention_hours)
     job = Job(
@@ -65,6 +66,7 @@ async def create_image_job(
         fit_pref=fit_pref,
         height_cm=height_cm,
         measurements_json=measurements_json,
+        inputs_json=inputs_json,
     )
     session.add(job)
     await session.flush()

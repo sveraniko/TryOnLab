@@ -10,10 +10,13 @@ from app.bot.ui.keyboards import back_keyboard, home_keyboard
 class Screen(StrEnum):
     HOME = 'home'
     PRODUCT = 'product'
+    PRODUCT_SCOPE = 'product_scope'
     USER_PHOTO_MENU = 'user_photo_menu'
     USER_PHOTO_LIST = 'user_photo_list'
     USER_PHOTO_UPLOAD = 'user_photo_upload'
     FIT = 'fit'
+    MODE = 'mode'
+    SCOPE = 'scope'
     MEASUREMENTS = 'measurements'
     GENERATE = 'generate'
     VIDEO_MENU = 'video_menu'
@@ -33,6 +36,9 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         product_ok = '✅' if context.get('product_file_id') else '❌'
         fit = context.get('fit_pref') or '—'
         ms = '✅' if context.get('measurements_json') else '—'
+        mode = (context.get('gen_mode') or 'strict').title()
+        mode_icon = '🔒' if (context.get('gen_mode') or 'strict') == 'strict' else '✨'
+        scope = (context.get('edit_scope') or 'full').title()
         can_generate = bool(context.get('product_file_id') and active)
         last_image_status = context.get('last_image_status', '—')
         has_last_image = last_image_status == 'done' and bool(context.get('last_image_job_id'))
@@ -41,6 +47,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             f'🧠 Provider: {provider} (video {video})\n'
             f'👤 User photo: {"✅" if active else "❌"} active ({active or "—"}) | stored: {stored}\n'
             f'🧥 Product photo: {product_ok} 1/1\n'
+            f'🧩 Mode: {mode} {mode_icon}\n'
+            f'🎛️ Scope: {scope}\n'
             f'🎯 Fit: {fit}\n'
             f'📏 Measurements: {ms}\n'
             f'🧾 Last image job: {last_image_status} | last video: {context.get("last_video_status", "—")}\n\n'
@@ -57,6 +65,37 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             ]
         )
         return f'🧥 Товар • Загрузка\n\nПришли 1 фото товара в этот чат.\n\nТекущий статус: {ok}', kb
+
+    if screen == Screen.PRODUCT_SCOPE:
+        current = (context.get('edit_scope') or 'full').lower()
+        def label(name: str) -> str:
+            return f'{name.title()} {"✅" if current == name else ""}'.strip()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=label('upper'), callback_data='scope:set:upper'), InlineKeyboardButton(text=label('lower'), callback_data='scope:set:lower')],
+            [InlineKeyboardButton(text=label('feet'), callback_data='scope:set:feet'), InlineKeyboardButton(text=label('full'), callback_data='scope:set:full')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
+        ])
+        return '🧥 Для чего этот товар?\n\nВыбери зону редактирования для этого товара:', kb
+
+    if screen == Screen.MODE:
+        mode = (context.get('gen_mode') or 'strict').lower()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f'Strict 🔒{" ✅" if mode == "strict" else ""}', callback_data='mode:set:strict')],
+            [InlineKeyboardButton(text=f'Creative ✨{" ✅" if mode == "creative" else ""}', callback_data='mode:set:creative')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
+        ])
+        return '🧩 Режим генерации\n\nStrict: меняем только выбранную зону.\nCreative: можно стилизовать образ вокруг вещи.', kb
+
+    if screen == Screen.SCOPE:
+        current = (context.get('edit_scope') or 'full').lower()
+        def label(name: str) -> str:
+            return f'{name.title()} {"✅" if current == name else ""}'.strip()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=label('upper'), callback_data='scope:set:upper'), InlineKeyboardButton(text=label('lower'), callback_data='scope:set:lower')],
+            [InlineKeyboardButton(text=label('feet'), callback_data='scope:set:feet'), InlineKeyboardButton(text=label('full'), callback_data='scope:set:full')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
+        ])
+        return '🎛️ Зона редактирования\n\nВыбери область: Upper / Lower / Feet / Full.', kb
 
     if screen == Screen.USER_PHOTO_MENU:
         me = context.get('me', {})

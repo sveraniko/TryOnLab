@@ -9,6 +9,7 @@ def home_keyboard(can_generate: bool, has_last_image: bool = False) -> InlineKey
     gen = InlineKeyboardButton(text='⚡ Генерировать' if can_generate else '⚡ Генерировать (недоступно)', callback_data='gen:image')
     rows = [
         [InlineKeyboardButton(text='🧥 Товар', callback_data='nav:product'), InlineKeyboardButton(text='👤 Моё фото', callback_data='nav:userphoto')],
+        [InlineKeyboardButton(text='🧩 Режим', callback_data='nav:mode'), InlineKeyboardButton(text='🎛️ Зона', callback_data='nav:scope')],
         [InlineKeyboardButton(text='🎯 Посадка', callback_data='nav:fit'), InlineKeyboardButton(text='📏 Параметры', callback_data='nav:measurements')],
         [gen],
     ]
