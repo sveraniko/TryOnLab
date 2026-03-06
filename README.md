@@ -47,11 +47,15 @@ tryonlab/
    ```bash
    docker compose up -d --build
    ```
-3. Проверить liveness/readiness API:
+3. Начиная с PR-01, применить миграции:
+   ```bash
+   docker compose exec api alembic upgrade head
+   ```
+4. Проверить liveness/readiness API:
    ```bash
    curl http://localhost:8000/health
    ```
-4. Посмотреть логи:
+5. Посмотреть логи:
    ```bash
    docker compose logs -f api
    docker compose logs -f bot
@@ -71,5 +75,5 @@ tryonlab/
 - Поток бота: [docs/20_bot_flow.md](docs/20_bot_flow.md)
 
 ## Что будет в PR-01+
-- Alembic и миграции будут добавлены в PR-01.
+- Начиная с PR-01, перед первым запуском API нужно выполнить `alembic upgrade head` внутри контейнера `api`.
 - Jobs API, очередь и worker — в следующих PR по плану.
