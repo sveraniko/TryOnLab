@@ -1,0 +1,83 @@
+Summary
+Провёл глобальный аудит по вашему чек‑листу (runtime/deps/API/bot/worker/security/look-builder/perf) на коде и локальных тестах; выявил 1 blocker, несколько major и minor рисков.
+
+Сделал маленький безопасный audit-fixes change: в обычной (non-lock-engine) ветке image worker теперь всегда пишется единый набор метаданных (mode/scope/force_lock/lock_engine/parsing_backend) для консистентности V2 quality plumbing. 
+
+Добавил unit‑тест на этот сценарий, чтобы регресс не вернулся. 
+
+A) BLOCKERS
+Severity: BLOCKER
+Files: app/worker/loop.py
+Проблема: Redis lock на job фиксирован ex=300 без продления lease. Если job работает дольше 5 минут, lock протухает и другой worker может взять ту же задачу (двойная обработка, двойные затраты, race по статусам/артефактам). 
+Fix: Ввести heartbeat/lease-renew (например, PEXPIRE каждые N секунд в фоне на время выполнения job) или использовать redlock/stream consumer group с ack-моделью.
+
+B) MAJOR ISSUES
+Severity: MAJOR (исправлено в audit-fixes PR)
+Files: app/worker/executor.py, tests/test_executor_metadata.py
+Проблема: Для plain image path раньше result_json зависел только от provider metadata и мог не содержать mode/scope/lock_engine/parsing_backend/force_lock; это ломает единообразие аналитики и downstream-логики.
+Fix: Уже внесён — унифицированный metadata envelope + тест. 
+
+Severity: MAJOR
+Files: app/bot/router.py
+Проблема: _monitor_job крутится бесконечно с polling каждые 2с без hard-timeout/guard по ошибкам API, что может приводить к “липкому” экрану генерации и лишней нагрузке при деградации backend. 
+Fix: Добавить max monitoring window + backoff + обработку transient HTTP ошибок (с переходом на понятный fail-state в панели).
+
+Severity: MAJOR
+Files: app/services/jobs.py, app/api/routers/me.py
+Проблема: list_user_photos не фильтрует soft-deleted фото, из-за чего /me/photos возвращает удалённые элементы (UX/consistency risk). 
+Fix: Фильтровать UserPhoto.deleted_at.is_(None) в count/items query.
+
+C) MINOR / NICE TO HAVE
+Severity: MINOR
+Files: app/bot/ui/panel.py, app/bot/router.py, app/api/routers/me.py
+Проблема: Инвариант “ровно одна панель” в целом соблюдается через panel_message_id, но при нештатной потере сообщения создаётся новая панель без попытки cleanup старых сообщений. 
+Fix: При re-create панели хранить/пытаться удалять предыдущую known panel (best-effort), либо периодически self-heal через reconcile.
+
+Severity: MINOR
+Files: tests/stubs/fastapi.py
+Проблема: В репо есть test-stub fastapi.py; это не root shadow-пакет, но при неверном PYTHONPATH теоретически может перехватить импорт. 
+Fix: Явно изолировать тестовый путь в conftest/pytest.ini и добавить note в docs по запуску тестов.
+
+Severity: MINOR
+Files: app/worker/cleanup.py, app/api/routers/me.py
+Проблема: Cleanup/purge корректно удаляют job media и не трогают user_photos в cleanup, но стоит формализовать это тестом на “cleanup не удаляет user photos” (сейчас покрыто в основном позитивным кейсом jobs cleanup). 
+Fix: Добавить unit/integration test для строгого инварианта.
+
+Что проверено по ключевым пунктам чек-листа (кратко)
+Provider allowlist + registry check есть и валидируется до постановки job. 
+
+Owner-check для job endpoints реализован через get_job_for_user. 
+
+look builder берет базу через job_id и заново тянет result_image_url из /jobs/{id} (не хранит “истину” в протухающей ссылке). 
+
+ONNX parsing fallback присутствует и уходит в crop_v1_fallback, если backend/model недоступны. 
+
+Purge удаляет user photos и job media + сбрасывает job status key в Redis. 
+
+Коммит и PR
+Сделал коммит и создал PR через make_pr:
+
+Commit: 9271d73
+
+PR title: audit-fixes: normalize result metadata for non-lock image pipeline
+
+Testing
+⚠️ docker compose up -d --build (в текущем окружении отсутствует docker: bash: command not found: docker)
+
+✅ python - <<'PY' ... importlib.util.find_spec('fastapi'/'aiogram'/'sqlalchemy') ... PY
+
+✅ find . -maxdepth 2 -type f \( -name 'fastapi.py' -o -name 'aiogram.py' -o -name 'sqlalchemy.py' \) -print
+
+✅ pytest -q
+
+
+Files (2)
+
+executor.py
+app/worker/executor.py
++8
+-1
+
+test_executor_metadata.py
+tests/test_executor_metadata.py
+New
