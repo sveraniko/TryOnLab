@@ -92,7 +92,14 @@ async def execute_job(
             on_progress=on_progress,
         )
         job.result_image_key = result.storage_key
-        job.result_json = result.metadata
+        job.result_json = {
+            **(result.metadata or {}),
+            'mode': mode,
+            'scope': scope,
+            'lock_engine': 'disabled',
+            'parsing_backend': 'none',
+            'force_lock': force_lock,
+        }
         return
 
     if job.type == 'tryon_video':
