@@ -48,6 +48,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         can_generate = bool(context.get('product_file_id') and active)
         last_image_status = context.get('last_image_status', '—')
         has_last_image = last_image_status == 'done' and bool(context.get('last_image_job_id'))
+        lower_hint = '\n💡 Lower + Patch = experimental' if (context.get('edit_scope') or '').lower() == 'lower' else ''
         text = (
             '🧪 TryOnLab • Dashboard\n\n'
             f'🧠 Provider: {provider} (video {video})\n'
@@ -59,6 +60,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             f'📏 Measurements: {ms}\n'
             f'🧾 Last image job: {last_image_status} | last video: {context.get("last_video_status", "—")}\n\n'
             f'Generate: {"available ✅" if can_generate else "disabled ❌"}'
+            f'{lower_hint}'
         )
         return text, home_keyboard(can_generate=can_generate, has_last_image=has_last_image)
 
@@ -111,7 +113,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
                 [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
             ]
         )
-        return '🎛️ Зона редактирования\n\nВыбери область: Upper / Lower / Feet / Full.', kb
+        hint = '\n\n💡 Lower + Patch = experimental.' if current == 'lower' else ''
+        return f'🎛️ Зона редактирования\n\nВыбери область: Upper / Lower / Feet / Full.{hint}', kb
 
     if screen == Screen.USER_PHOTO_MENU:
         me = context.get('me', {})
@@ -136,6 +139,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         items = context.get('photo_items', [])
         active = context.get('me', {}).get('active_user_photo_id')
         rows = []
+        item_patch_mode = context.get('look_item_patch_mode')
         current_row = []
         for item in items:
             label = f'#{item["id"]}{" ✅" if item["id"] == active else ""}'
@@ -226,6 +230,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         items = context.get('history_items', [])
         lines = ['🧾 История', '']
         rows = []
+        item_patch_mode = context.get('look_item_patch_mode')
         row = []
         for item in items:
             lines.append(f'#{item["job_id"][:8]} {item["type"]} {item["status"]} ({item["provider"]})')
@@ -252,7 +257,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             f'Steps: {steps}\n'
             f'Base image: {"✅" if has_base else "❌"}\n'
             f'Patch mode: {"✅" if patch_mode else "❌"}\n'
-            f'Mode/Scope: {mode} / {scope}'
+            f'Mode/Scope: {mode} / {scope}\n'
+            '💡 Lower item: patch experimental'
         )
         kb_rows = [[InlineKeyboardButton(text='🩹 Patch mode', callback_data='look:patch_toggle')], [InlineKeyboardButton(text='➕ Добавить предмет', callback_data='look:add_item')]]
         if steps > 0:
@@ -284,7 +290,9 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             [InlineKeyboardButton(text='⬅️ Назад', callback_data='look:back_add')],
         ]
         hint = ''
-        if (context.get('gen_mode') or 'strict') == 'strict' and current == 'upper':
+        if current == 'lower':
+            hint = '\n\n💡 Patch mode for lower garments is experimental.'
+        elif (context.get('gen_mode') or 'strict') == 'strict' and current == 'upper':
             hint = '\n\n💡 Strict + Upper = безопасно.'
         return f'🧩 Для чего этот товар?\n\nВыбери, куда относится предмет, чтобы правильно надеть{hint}', InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -295,6 +303,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         steps = int(context.get('look_steps') or 0)
         has_item = bool(context.get('look_item_product_file_id'))
         rows = []
+        item_patch_mode = context.get('look_item_patch_mode')
         if has_item and scope != '—':
             rows.append([InlineKeyboardButton(text='⚡ Применить', callback_data='look:apply')])
         rows.append([InlineKeyboardButton(text='🔁 Заменить предмет', callback_data='look:replace_item')])
@@ -305,7 +314,8 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             f'Mode: {mode}\n'
             f'Scope: {scope}\n'
             f'Steps: {steps}\n'
-            f'Provider: {provider}',
+            f'Provider: {provider}\n'
+            f'Patch: {"ON ✅" if item_patch_mode else "OFF ❌"}',
             InlineKeyboardMarkup(inline_keyboard=rows),
         )
 
@@ -316,6 +326,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         job_id = context.get('polling_job_id') or '—'
         status = context.get('job_status', 'queued')
         rows = []
+        item_patch_mode = context.get('look_item_patch_mode')
         if status != 'running' and status != 'queued':
             rows.append([InlineKeyboardButton(text='⬅️ В LOOK_HOME', callback_data='look:home')])
         return f'🧩 Конструктор лука • Генерация\n\njob_id: {job_id}\nstatus: {status} {progress}%\n[{bar}]', InlineKeyboardMarkup(inline_keyboard=rows)

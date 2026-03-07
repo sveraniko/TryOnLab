@@ -15,6 +15,7 @@ from app.bot.api.client import ApiClient
 from app.bot.fsm.states import WizardStates
 from app.bot.services.look_builder import (
     choose_force_lock,
+    default_patch_mode_for_item,
     choose_person_input,
     new_look_step,
     push_look_step,
@@ -117,7 +118,7 @@ async def start_handler(message: Message, state: FSMContext, bot: Bot, settings:
     panel_id = await ensure_panel(bot, chat_id=message.chat.id, panel_message_id=me.get('panel_message_id'), fallback_text='TryOnLab loading...')
     if me.get('panel_message_id') != panel_id:
         await api.patch_me({'panel_message_id': panel_id})
-    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full', look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_base_job_id=None)
+    await state.update_data(screen=Screen.HOME.value, gen_mode='strict', edit_scope='full', look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_patch_user_set=False, look_base_job_id=None)
     await _render_current(bot, state, message.chat.id, api, settings)
 
 
@@ -155,7 +156,7 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         await state.set_state(None)
         data = await state.get_data()
         if 'look_stack' not in data:
-            await state.update_data(look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_base_job_id=None)
+            await state.update_data(look_active=False, look_steps=0, look_stack=[], look_patch_mode=True, look_patch_user_set=False, look_base_job_id=None)
     else:
         await state.set_state(None)
 
@@ -194,7 +195,7 @@ async def on_product_photo(message: Message, state: FSMContext, bot: Bot, settin
 @router.message(WizardStates.await_look_item_photo, F.photo)
 async def on_look_item_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     file_id = message.photo[-1].file_id
-    await state.update_data(look_item_product_file_id=file_id, look_item_scope=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    await state.update_data(look_item_product_file_id=file_id, look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
     await try_delete(bot, message.chat.id, message.message_id)
     api = await _client(message, settings)
     await _render_current(bot, state, message.chat.id, api, settings)
@@ -484,7 +485,7 @@ async def look_use_session_product(query: CallbackQuery, state: FSMContext, bot:
     if not data.get('product_file_id'):
         return
     await state.set_state(None)
-    await state.update_data(look_item_product_file_id=data['product_file_id'], look_item_scope=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    await state.update_data(look_item_product_file_id=data['product_file_id'], look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
@@ -505,7 +506,9 @@ async def look_item_scope(query: CallbackQuery, state: FSMContext, bot: Bot, set
     if scope not in {'upper', 'lower', 'feet', 'full'}:
         return
     await state.set_state(None)
-    await state.update_data(look_item_scope=scope, screen=Screen.LOOK_CONFIRM_APPLY.value)
+    data = await state.get_data()
+    item_patch_mode = default_patch_mode_for_item(scope, data.get('look_patch_mode'))
+    await state.update_data(look_item_scope=scope, look_item_patch_mode=item_patch_mode, screen=Screen.LOOK_CONFIRM_APPLY.value)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
@@ -536,7 +539,7 @@ async def look_patch_toggle(query: CallbackQuery, state: FSMContext, bot: Bot, s
     await query.answer()
     data = await state.get_data()
     current = bool(data.get('look_patch_mode', True))
-    await state.update_data(look_patch_mode=not current, screen=Screen.LOOK_HOME.value)
+    await state.update_data(look_patch_mode=not current, look_patch_user_set=True, screen=Screen.LOOK_HOME.value)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 @router.callback_query(F.data == 'look:apply')
@@ -586,7 +589,7 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
         measurements_json=data.get('measurements_json'),
         mode=data.get('gen_mode', 'strict'),
         scope=item_scope,
-        force_lock=choose_force_lock(data.get('look_patch_mode')),
+        force_lock=choose_force_lock(data.get('look_item_patch_mode'), scope=item_scope),
     )
     await state.update_data(polling_job_id=job['job_id'], job_status='queued', progress=0, screen=Screen.LOOK_MONITOR.value)
     await _render_current(bot, state, query.message.chat.id, api, settings)
@@ -688,7 +691,7 @@ async def look_generate_video(query: CallbackQuery, state: FSMContext, bot: Bot,
 @router.callback_query(F.data == 'session:reset')
 async def reset_session(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full', 'look_active': False, 'look_steps': 0, 'look_stack': [], 'look_patch_mode': True, 'look_base_job_id': None}
+    keep = {'screen': Screen.HOME.value, 'gen_mode': 'strict', 'edit_scope': 'full', 'look_active': False, 'look_steps': 0, 'look_stack': [], 'look_patch_mode': True, 'look_patch_user_set': False, 'look_base_job_id': None}
     await state.clear()
     await state.update_data(**keep)
     api = await _client(query, settings)

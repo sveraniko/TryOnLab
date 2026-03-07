@@ -35,7 +35,7 @@ async def execute_job(
 
         force_lock = _input_bool(job, 'force_lock', False)
 
-        if scope != 'full' and (mode == 'strict' or force_lock):
+        if scope != 'full' and force_lock:
             person_bytes = await storage.get_bytes(person_key)
             plan = await prepare_controlled_patch(
                 settings=settings,
@@ -77,6 +77,7 @@ async def execute_job(
                 'parsing_backend': plan.parsing_backend,
                 'mask_area_ratio': plan.mask_area_ratio,
                 'force_lock': force_lock,
+                **(plan.metadata or {}),
             }
             return
 

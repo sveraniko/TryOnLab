@@ -29,3 +29,9 @@ def test_build_tryon_prompt_force_lock_adds_hard_constraints() -> None:
     prompt = build_tryon_prompt('creative', 'upper', 'regular', None, force_lock=True)
     assert 'Do not change anything outside the edited region.' in prompt
     assert 'Do not add skirt/pants/shoes unless scope demands.' in prompt
+
+
+def test_build_tryon_prompt_strict_lower_has_hard_replace_block() -> None:
+    prompt = build_tryon_prompt('strict', 'lower', 'regular', None)
+    assert 'Replace the existing lower-body garment completely with these pants.' in prompt
+    assert 'Do not keep the original shorts visible.' in prompt
