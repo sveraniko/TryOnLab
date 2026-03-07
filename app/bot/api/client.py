@@ -52,7 +52,9 @@ class ApiClient:
     async def create_job(
         self,
         *,
-        product: bytes,
+        product: bytes | None = None,
+        product_clean: bytes | None = None,
+        product_fit: bytes | None = None,
         user_photo_id: int | None,
         person_image: bytes | None = None,
         fit_pref: str | None,
@@ -61,7 +63,14 @@ class ApiClient:
         scope: str | None,
         force_lock: bool = False,
     ) -> dict[str, Any]:
-        files = {'product_image': ('product.jpg', product, 'image/jpeg')}
+        files: dict[str, tuple[str, bytes, str]] = {}
+        effective_clean = product_clean or product
+        if effective_clean is not None:
+            files['product_clean_image'] = ('product_clean.jpg', effective_clean, 'image/jpeg')
+        if product_fit is not None:
+            files['product_fit_image'] = ('product_fit.jpg', product_fit, 'image/jpeg')
+        if not files:
+            raise ValueError('At least one product reference is required')
         data: dict[str, Any] = {}
         if person_image is not None:
             files['person_image'] = ('person.jpg', person_image, 'image/jpeg')

@@ -16,7 +16,9 @@ class DummyProvider(ProviderBase):
         self,
         *,
         job_id: str,
-        storage_key_product: str,
+        storage_key_product: str | None = None,
+        storage_key_product_clean: str | None = None,
+        storage_key_product_fit: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict | None = None,
@@ -26,6 +28,8 @@ class DummyProvider(ProviderBase):
         on_progress=None,
     ) -> ProviderResult:
         _ = storage_key_product
+        _ = storage_key_product_clean
+        _ = storage_key_product_fit
         _ = fit_pref
         _ = measurements
         _ = mode

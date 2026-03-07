@@ -40,7 +40,9 @@ class GrokProvider(ProviderBase):
         self,
         *,
         job_id: str,
-        storage_key_product: str,
+        storage_key_product: str | None = None,
+        storage_key_product_clean: str | None = None,
+        storage_key_product_fit: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
@@ -49,20 +51,36 @@ class GrokProvider(ProviderBase):
         force_lock: bool = False,
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
+        clean_key = storage_key_product_clean or storage_key_product
+        fit_key = storage_key_product_fit
+        if not clean_key and not fit_key:
+            raise ProviderBadRequestError('Grok requires at least one garment reference')
+
         person_bytes = await self.storage.get_bytes(storage_key_person)
-        garment_bytes = await self.storage.get_bytes(storage_key_product)
 
         person_data_uri = _to_data_uri(storage_key_person, person_bytes)
-        garment_data_uri = _to_data_uri(storage_key_product, garment_bytes)
-        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements, force_lock=force_lock)
+        prompt = build_tryon_prompt(
+            mode,
+            scope,
+            fit_pref,
+            measurements,
+            force_lock=force_lock,
+            has_clean_ref=bool(clean_key),
+            has_fit_ref=bool(fit_key),
+        )
+
+        images = [{'url': person_data_uri, 'type': 'image_url'}]
+        if clean_key:
+            clean_bytes = await self.storage.get_bytes(clean_key)
+            images.append({'url': _to_data_uri(clean_key, clean_bytes), 'type': 'image_url'})
+        if fit_key:
+            fit_bytes = await self.storage.get_bytes(fit_key)
+            images.append({'url': _to_data_uri(fit_key, fit_bytes), 'type': 'image_url'})
 
         payload = {
             'model': self.settings.xai_image_model,
             'prompt': prompt,
-            'images': [
-                {'url': person_data_uri, 'type': 'image_url'},
-                {'url': garment_data_uri, 'type': 'image_url'},
-            ],
+            'images': images,
             'response_format': self.settings.xai_image_response_format,
         }
 

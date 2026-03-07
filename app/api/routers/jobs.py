@@ -109,7 +109,9 @@ async def list_jobs_endpoint(
     )
 @router.post('', response_model=JobCreateResponse)
 async def create_job(
-    product_image: UploadFile = File(...),
+    product_image: UploadFile | None = File(default=None),
+    product_clean_image: UploadFile | None = File(default=None),
+    product_fit_image: UploadFile | None = File(default=None),
     person_image: UploadFile | None = File(default=None),
     user_photo_id: int | None = Form(default=None),
     fit_pref: str | None = Form(default=None),
@@ -135,9 +137,19 @@ async def create_job(
     if fit_pref is not None and fit_pref not in {'slim', 'regular', 'oversize'}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid fit_pref')
 
-    product_bytes, product_content_type, product_filename = await validate_image_upload(
-        product_image, settings.max_upload_mb
-    )
+    if product_image is None and product_clean_image is None and product_fit_image is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail='Provide at least one of product_image, product_clean_image, or product_fit_image',
+        )
+
+    effective_clean_image = product_clean_image or product_image
+    clean_payload: tuple[bytes, str, str] | None = None
+    fit_payload: tuple[bytes, str, str] | None = None
+    if effective_clean_image is not None:
+        clean_payload = await validate_image_upload(effective_clean_image, settings.max_upload_mb)
+    if product_fit_image is not None:
+        fit_payload = await validate_image_upload(product_fit_image, settings.max_upload_mb)
 
     person_key = None
     validated_user_photo_id = None
@@ -161,12 +173,35 @@ async def create_job(
     selected_provider = _validate_provider(provider or user_settings.provider, settings, registry)
 
     job_id = uuid.uuid4()
-    product_key = job_key(job_id, 'input', product_filename)
-    await storage.put_bytes(product_key, product_bytes, content_type=product_content_type)
+    product_clean_key = None
+    product_fit_key = None
+    if clean_payload is not None:
+        clean_bytes, clean_content_type, _clean_filename = clean_payload
+        product_clean_key = job_key(job_id, 'input', 'product_clean.jpg')
+        await storage.put_bytes(product_clean_key, clean_bytes, content_type=clean_content_type)
+    if fit_payload is not None:
+        fit_bytes, fit_content_type, _fit_filename = fit_payload
+        product_fit_key = job_key(job_id, 'input', 'product_fit.jpg')
+        await storage.put_bytes(product_fit_key, fit_bytes, content_type=fit_content_type)
+
+    product_key = product_clean_key or product_fit_key
 
     if person_bytes is not None and person_content_type is not None and person_filename is not None:
         person_key = job_key(job_id, 'input', person_filename)
         await storage.put_bytes(person_key, person_bytes, content_type=person_content_type)
+
+    if product_clean_key and product_fit_key:
+        ref_mode = 'clean_plus_fit'
+    elif product_clean_key:
+        ref_mode = 'clean_only'
+    else:
+        ref_mode = 'fit_only'
+
+    inputs_json = {"mode": normalized_mode, "scope": normalized_scope, "force_lock": normalized_force_lock, 'product_reference_mode': ref_mode}
+    if product_clean_key:
+        inputs_json['product_clean_key'] = product_clean_key
+    if product_fit_key:
+        inputs_json['product_fit_key'] = product_fit_key
 
     job = await create_image_job(
         session,
@@ -180,7 +215,7 @@ async def create_job(
         fit_pref=fit_pref,
         height_cm=height_cm,
         measurements_json=measurements,
-        inputs_json={"mode": normalized_mode, "scope": normalized_scope, "force_lock": normalized_force_lock},
+        inputs_json=inputs_json,
     )
     await session.commit()
 

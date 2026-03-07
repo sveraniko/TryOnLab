@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import logging
 import mimetypes
 import time
 from typing import Any, Awaitable, Callable
@@ -25,6 +26,7 @@ from app.services.storage import StorageBackend
 from app.services.storage_keys import job_key
 
 ProgressCallback = Callable[[int], Awaitable[None]]
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider(ProviderBase):
@@ -44,7 +46,9 @@ class OpenAIProvider(ProviderBase):
         self,
         *,
         job_id: str,
-        storage_key_product: str,
+        storage_key_product: str | None = None,
+        storage_key_product_clean: str | None = None,
+        storage_key_product_fit: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
@@ -54,16 +58,32 @@ class OpenAIProvider(ProviderBase):
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
         person_bytes = await self.storage.get_bytes(storage_key_person)
-        garment_bytes = await self.storage.get_bytes(storage_key_product)
-        prompt = build_tryon_prompt(mode, scope, fit_pref, measurements, force_lock=force_lock)
+        clean_key = storage_key_product_clean or storage_key_product
+        fit_key = storage_key_product_fit
+        if not clean_key and not fit_key:
+            raise ProviderBadRequestError('OpenAI requires at least one garment reference')
+
+        clean_bytes = await self.storage.get_bytes(clean_key) if clean_key else None
+        fit_bytes = await self.storage.get_bytes(fit_key) if fit_key else None
+        prompt = build_tryon_prompt(
+            mode,
+            scope,
+            fit_pref,
+            measurements,
+            force_lock=force_lock,
+            has_clean_ref=bool(clean_key),
+            has_fit_ref=bool(fit_key),
+        )
 
         form_files, form_data = _build_edit_form(
             model=self.settings.openai_image_model,
             prompt=prompt,
             person_key=storage_key_person,
             person_bytes=person_bytes,
-            garment_key=storage_key_product,
-            garment_bytes=garment_bytes,
+            garment_clean_key=clean_key,
+            garment_clean_bytes=clean_bytes,
+            garment_fit_key=fit_key,
+            garment_fit_bytes=fit_bytes,
             include_response_format=True,
         )
 
@@ -84,8 +104,37 @@ class OpenAIProvider(ProviderBase):
                     prompt=prompt,
                     person_key=storage_key_person,
                     person_bytes=person_bytes,
-                    garment_key=storage_key_product,
-                    garment_bytes=garment_bytes,
+                    garment_clean_key=clean_key,
+                    garment_clean_bytes=clean_bytes,
+                    garment_fit_key=fit_key,
+                    garment_fit_bytes=fit_bytes,
+                    include_response_format=False,
+                )
+                response = await client.post(
+                    f"{self.settings.openai_base_url.rstrip('/')}/images/edits",
+                    headers={'Authorization': f'Bearer {self.settings.openai_api_key}'},
+                    data=form_data,
+                    files=form_files,
+                )
+            if fit_key and clean_key and response.status_code == 400 and _is_unsupported_multiref(response):
+                logger.info('OpenAI multiref unsupported, fallback to clean-only', extra={'job_id': job_id})
+                form_files, form_data = _build_edit_form(
+                    model=self.settings.openai_image_model,
+                    prompt=build_tryon_prompt(
+                        mode,
+                        scope,
+                        fit_pref,
+                        measurements,
+                        force_lock=force_lock,
+                        has_clean_ref=bool(clean_key),
+                        has_fit_ref=False,
+                    ),
+                    person_key=storage_key_person,
+                    person_bytes=person_bytes,
+                    garment_clean_key=clean_key,
+                    garment_clean_bytes=clean_bytes,
+                    garment_fit_key=None,
+                    garment_fit_bytes=None,
                     include_response_format=False,
                 )
                 response = await client.post(
@@ -220,21 +269,32 @@ def _build_edit_form(
     prompt: str,
     person_key: str,
     person_bytes: bytes,
-    garment_key: str,
-    garment_bytes: bytes,
+    garment_clean_key: str | None,
+    garment_clean_bytes: bytes | None,
+    garment_fit_key: str | None,
+    garment_fit_bytes: bytes | None,
     include_response_format: bool,
 ) -> tuple[list[tuple[str, tuple[str, bytes, str]]], dict[str, str | int]]:
     person_mime = mimetypes.guess_type(person_key)[0] or 'image/jpeg'
-    garment_mime = mimetypes.guess_type(garment_key)[0] or 'image/jpeg'
 
-    files = [
-        ('image', ('person.jpg', person_bytes, person_mime)),
-        ('image', ('garment.jpg', garment_bytes, garment_mime)),
-    ]
+    files = [('image', ('person.jpg', person_bytes, person_mime))]
+    if garment_clean_key and garment_clean_bytes is not None:
+        garment_clean_mime = mimetypes.guess_type(garment_clean_key)[0] or 'image/jpeg'
+        files.append(('image', ('garment_clean.jpg', garment_clean_bytes, garment_clean_mime)))
+    if garment_fit_key and garment_fit_bytes is not None:
+        garment_fit_mime = mimetypes.guess_type(garment_fit_key)[0] or 'image/jpeg'
+        files.append(('image', ('garment_fit.jpg', garment_fit_bytes, garment_fit_mime)))
     data: dict[str, str | int] = {'model': model, 'prompt': prompt, 'n': 1}
     if include_response_format:
         data['response_format'] = 'b64_json'
     return files, data
+
+
+def _is_unsupported_multiref(response: httpx.Response) -> bool:
+    if response.status_code != 400:
+        return False
+    body = response.text.lower()
+    return 'unsupported' in body or 'too many image' in body or 'invalid image' in body
 
 
 async def _download_bytes(client: httpx.AsyncClient, url: str, api_key: str) -> bytes:
