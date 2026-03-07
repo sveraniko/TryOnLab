@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     vision_mask_margin_px: int = 24
     vision_mask_dilate_px: int = 12
     vision_mask_feather_px: int = 16
+    lower_waist_overlap_px: int = 96
+    lower_min_top_extension_ratio: float = 0.10
+    lower_core_erode_px: int = 10
+    lower_edge_feather_px: int = 14
+    lower_mask_dilate_up_px: int = 48
+    lower_mask_dilate_side_px: int = 12
+    lower_mask_dilate_down_px: int = 16
     vision_debug_save_masks: bool = False
 
 

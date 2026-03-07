@@ -24,6 +24,11 @@ STRICT_SCOPE_RULES: dict[str, list[str]] = {
     ],
     'lower': [
         'Edit scope: lower body only (pants, skirts, shorts).',
+        'Replace the existing lower-body garment completely with these pants.',
+        'Do not keep the original shorts visible.',
+        'Keep upper body clothing unchanged.',
+        'Preserve the waistband shape of the new garment clearly.',
+        'Do not alter shoes unless they are naturally occluded by the pants.',
         'Keep the original outfit unchanged outside the edited region.',
         'Do NOT change top, jacket, arms, or upper-body clothing.',
         'Do NOT change shoes unless scope is feet.',

@@ -88,6 +88,25 @@ def dilate_mask(mask: np.ndarray, px: int) -> np.ndarray:
     return cv2.dilate(mask, kernel, iterations=1)
 
 
+def dilate_mask_asymmetric(mask: np.ndarray, *, up_px: int, side_px: int, down_px: int) -> np.ndarray:
+    if up_px <= 0 and side_px <= 0 and down_px <= 0:
+        return mask
+    if cv2 is None:
+        return mask
+    kernel = np.zeros((up_px + down_px + 1, side_px * 2 + 1), dtype=np.uint8)
+    kernel[:, :] = 1
+    return cv2.dilate(mask, kernel, iterations=1)
+
+
+def erode_mask(mask: np.ndarray, px: int) -> np.ndarray:
+    if px <= 0:
+        return mask
+    if cv2 is None:
+        return mask
+    kernel = np.ones((px * 2 + 1, px * 2 + 1), dtype=np.uint8)
+    return cv2.erode(mask, kernel, iterations=1)
+
+
 def feather_mask(mask: np.ndarray, px: int) -> np.ndarray:
     if px <= 0:
         return mask

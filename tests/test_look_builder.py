@@ -3,6 +3,7 @@ import asyncio
 from app.bot.services.look_builder import (
     choose_force_lock,
     choose_person_input,
+    default_patch_mode_for_item,
     new_look_step,
     push_look_step,
     reset_look,
@@ -66,5 +67,11 @@ def test_resolve_person_image_bytes_without_base_job() -> None:
 
 def test_choose_force_lock_defaults_to_enabled() -> None:
     assert choose_force_lock(None) is True
+    assert choose_force_lock(None, scope='lower') is False
     assert choose_force_lock(True) is True
     assert choose_force_lock(False) is False
+
+
+def test_default_patch_mode_for_item_lower_off() -> None:
+    assert default_patch_mode_for_item('lower', True) is False
+    assert default_patch_mode_for_item('upper', True) is True

@@ -75,7 +75,19 @@ async def resolve_person_image_bytes(
     return await read_bytes(result_url)
 
 
-def choose_force_lock(look_patch_mode: bool | None) -> bool:
+def choose_force_lock(look_patch_mode: bool | None, *, scope: str | None = None) -> bool:
+    normalized_scope = (scope or '').strip().lower()
+    if normalized_scope == 'lower' and look_patch_mode is None:
+        return False
     if look_patch_mode is None:
         return True
     return bool(look_patch_mode)
+
+
+def default_patch_mode_for_item(scope: str | None, global_patch_mode: bool | None) -> bool:
+    normalized_scope = (scope or '').strip().lower()
+    if normalized_scope == 'lower':
+        return False
+    if global_patch_mode is None:
+        return True
+    return bool(global_patch_mode)
