@@ -14,6 +14,8 @@ from app.providers.registry import ProviderRegistry
 from app.services.storage import StorageBackend
 from app.worker.lock_engine import compose_result, prepare_controlled_patch
 
+PROVIDER_IMAGE_INPUT_LIMIT = 3
+
 
 async def execute_job(
     session: AsyncSession,
@@ -27,14 +29,22 @@ async def execute_job(
 
     if job.type == 'tryon_image':
         person_key = await _resolve_person_key(session, job)
-        clean_key, fit_key = _resolve_product_keys(job)
-        if not clean_key and not fit_key:
+        clean_key, fit_key, extra_keys = _resolve_product_keys(job)
+        if not clean_key and not fit_key and not extra_keys:
             raise ProviderBadRequestError('No product image')
 
         mode = _input(job, 'mode', 'strict')
         scope = _input(job, 'scope', 'full')
-
         force_lock = _input_bool(job, 'force_lock', False)
+        reference_strategy = _input_strategy(job)
+        selected = select_reference_inputs(
+            clean_key=clean_key,
+            fit_key=fit_key,
+            extra_fit_keys=extra_keys,
+            scope=scope,
+            reference_strategy=reference_strategy,
+            provider_image_input_limit=PROVIDER_IMAGE_INPUT_LIMIT,
+        )
 
         if scope != 'full' and force_lock:
             person_bytes = await storage.get_bytes(person_key)
@@ -52,14 +62,16 @@ async def execute_job(
             result = await provider.generate_image(
                 job_id=str(job.id),
                 storage_key_product=job.product_media_key,
-                storage_key_product_clean=clean_key,
-                storage_key_product_fit=fit_key,
+                storage_key_product_clean=selected['clean'],
+                storage_key_product_fit=selected['fit'],
+                storage_key_product_fit_extra=selected['extra'],
                 storage_key_person=crop_key,
                 fit_pref=job.fit_pref,
                 measurements=job.measurements_json,
                 mode=mode,
                 scope=scope,
                 force_lock=force_lock,
+                reference_strategy=selected['strategy'],
                 on_progress=on_progress,
             )
             edited_crop_bytes = await storage.get_bytes(result.storage_key)
@@ -80,6 +92,7 @@ async def execute_job(
                 'parsing_backend': plan.parsing_backend,
                 'mask_area_ratio': plan.mask_area_ratio,
                 'force_lock': force_lock,
+                'reference_strategy': selected['strategy'],
                 **(plan.metadata or {}),
             }
             return
@@ -87,14 +100,16 @@ async def execute_job(
         result = await provider.generate_image(
             job_id=str(job.id),
             storage_key_product=job.product_media_key,
-            storage_key_product_clean=clean_key,
-            storage_key_product_fit=fit_key,
+            storage_key_product_clean=selected['clean'],
+            storage_key_product_fit=selected['fit'],
+            storage_key_product_fit_extra=selected['extra'],
             storage_key_person=person_key,
             fit_pref=job.fit_pref,
             measurements=job.measurements_json,
             mode=mode,
             scope=scope,
             force_lock=force_lock,
+            reference_strategy=selected['strategy'],
             on_progress=on_progress,
         )
         job.result_image_key = result.storage_key
@@ -105,6 +120,7 @@ async def execute_job(
             'lock_engine': 'disabled',
             'parsing_backend': 'none',
             'force_lock': force_lock,
+            'reference_strategy': selected['strategy'],
         }
         return
 
@@ -173,9 +189,87 @@ def _input_bool(job: Job, key: str, default: bool) -> bool:
     return bool(value)
 
 
-def _resolve_product_keys(job: Job) -> tuple[str | None, str | None]:
+def _input_strategy(job: Job) -> str:
     if not job.inputs_json:
-        return job.product_media_key, None
+        return 'auto'
+    value = str(job.inputs_json.get('reference_strategy', 'auto')).strip().lower()
+    if value in {'auto', 'fit_priority', 'clean_priority', 'fit_only', 'clean_only', 'multi_fit'}:
+        return value
+    return 'auto'
+
+
+def _resolve_product_keys(job: Job) -> tuple[str | None, str | None, list[str]]:
+    if not job.inputs_json:
+        return job.product_media_key, None, []
     clean_key = job.inputs_json.get('product_clean_key') or job.product_media_key
     fit_key = job.inputs_json.get('product_fit_key')
-    return str(clean_key) if clean_key else None, str(fit_key) if fit_key else None
+    extra_keys = [str(x) for x in (job.inputs_json.get('product_fit_extra_keys') or []) if x]
+    return str(clean_key) if clean_key else None, str(fit_key) if fit_key else None, extra_keys
+
+
+def resolve_effective_strategy(strategy: str, *, scope: str, clean_exists: bool, fit_exists: bool) -> str:
+    if strategy != 'auto':
+        return strategy
+    if fit_exists and scope in {'lower', 'full'}:
+        return 'fit_priority'
+    if clean_exists and scope == 'upper':
+        return 'clean_priority'
+    if fit_exists and not clean_exists:
+        return 'fit_only'
+    if clean_exists and not fit_exists:
+        return 'clean_only'
+    return 'auto'
+
+
+def select_reference_inputs(
+    *,
+    clean_key: str | None,
+    fit_key: str | None,
+    extra_fit_keys: list[str],
+    scope: str,
+    reference_strategy: str,
+    provider_image_input_limit: int,
+) -> dict[str, str | None]:
+    garment_limit = max(1, provider_image_input_limit - 1)
+    effective = resolve_effective_strategy(reference_strategy, scope=scope, clean_exists=bool(clean_key), fit_exists=bool(fit_key))
+    selected: list[tuple[str, str]] = []
+
+    def add(kind: str, key: str | None) -> None:
+        if not key or len(selected) >= garment_limit:
+            return
+        if any(existing_key == key for _, existing_key in selected):
+            return
+        selected.append((kind, key))
+
+    if effective == 'clean_only':
+        add('clean', clean_key)
+    elif effective == 'fit_only':
+        add('fit', fit_key or (extra_fit_keys[0] if extra_fit_keys else None))
+    elif effective == 'clean_priority':
+        add('clean', clean_key)
+        add('fit', fit_key)
+    elif effective == 'fit_priority':
+        add('fit', fit_key)
+        add('clean', clean_key)
+    elif effective == 'multi_fit':
+        add('fit', fit_key or (extra_fit_keys[0] if extra_fit_keys else None))
+        extra = extra_fit_keys[0] if fit_key else (extra_fit_keys[1] if len(extra_fit_keys) > 1 else None)
+        add('extra', extra)
+    else:
+        add('clean', clean_key)
+        add('fit', fit_key)
+
+    result = {'clean': None, 'fit': None, 'extra': None, 'strategy': effective}
+    for kind, key in selected:
+        if kind == 'clean' and result['clean'] is None:
+            result['clean'] = key
+        elif kind == 'fit' and result['fit'] is None:
+            result['fit'] = key
+        elif result['extra'] is None:
+            result['extra'] = key
+
+    if result['fit'] is None and result['extra'] is not None:
+        result['fit'] = result['extra']
+        result['extra'] = None
+
+    return result

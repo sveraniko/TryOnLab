@@ -43,17 +43,20 @@ class GrokProvider(ProviderBase):
         storage_key_product: str | None = None,
         storage_key_product_clean: str | None = None,
         storage_key_product_fit: str | None = None,
+        storage_key_product_fit_extra: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
         force_lock: bool = False,
+        reference_strategy: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
         clean_key = storage_key_product_clean or storage_key_product
         fit_key = storage_key_product_fit
-        if not clean_key and not fit_key:
+        fit_extra_key = storage_key_product_fit_extra
+        if not clean_key and not fit_key and not fit_extra_key:
             raise ProviderBadRequestError('Grok requires at least one garment reference')
 
         person_bytes = await self.storage.get_bytes(storage_key_person)
@@ -65,8 +68,9 @@ class GrokProvider(ProviderBase):
             fit_pref,
             measurements,
             force_lock=force_lock,
+            reference_strategy=reference_strategy,
             has_clean_ref=bool(clean_key),
-            has_fit_ref=bool(fit_key),
+            has_fit_ref=bool(fit_key or fit_extra_key),
         )
 
         images = [{'url': person_data_uri, 'type': 'image_url'}]
@@ -76,6 +80,9 @@ class GrokProvider(ProviderBase):
         if fit_key:
             fit_bytes = await self.storage.get_bytes(fit_key)
             images.append({'url': _to_data_uri(fit_key, fit_bytes), 'type': 'image_url'})
+        if fit_extra_key:
+            fit_extra_bytes = await self.storage.get_bytes(fit_extra_key)
+            images.append({'url': _to_data_uri(fit_extra_key, fit_extra_bytes), 'type': 'image_url'})
 
         payload = {
             'model': self.settings.xai_image_model,

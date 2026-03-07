@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -11,6 +17,7 @@ class Screen(StrEnum):
     HOME = 'home'
     PRODUCT = 'product'
     PRODUCT_SCOPE = 'product_scope'
+    PRODUCT_STRATEGY = 'product_strategy'
     USER_PHOTO_MENU = 'user_photo_menu'
     USER_PHOTO_LIST = 'user_photo_list'
     USER_PHOTO_UPLOAD = 'user_photo_upload'
@@ -27,6 +34,7 @@ class Screen(StrEnum):
     LOOK_HOME = 'look_home'
     LOOK_ADD_ITEM = 'look_add_item'
     LOOK_ITEM_SCOPE_SELECT = 'look_item_scope_select'
+    LOOK_ITEM_STRATEGY = 'look_item_strategy'
     LOOK_CONFIRM_APPLY = 'look_confirm_apply'
     LOOK_MONITOR = 'look_monitor'
     LOOK_VIDEO_MENU = 'look_video_menu'
@@ -68,23 +76,46 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
     if screen == Screen.PRODUCT:
         clean_ok = '✅' if (context.get('product_clean_file_id') or context.get('product_file_id')) else '❌'
         fit_ok = '✅' if context.get('product_fit_file_id') else '❌'
+        extra_count = len(context.get('product_fit_extra_file_ids') or [])
+        scope = (context.get('edit_scope') or '—').lower()
+        strategy = (context.get('reference_strategy') or 'auto').lower()
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text='🧩 Clean ref', callback_data='product:upload_clean')],
                 [InlineKeyboardButton(text='👗 Fit ref', callback_data='product:upload_fit')],
-                [InlineKeyboardButton(text='🗑️ Очистить всё', callback_data='product:clear')],
+                [InlineKeyboardButton(text='➕ Доп. fit ref', callback_data='product:upload_fit_extra')],
+                [InlineKeyboardButton(text='🎛️ Зона', callback_data='nav:product_scope')],
+                [InlineKeyboardButton(text='🧠 Strategy', callback_data='nav:product_strategy')],
+                [InlineKeyboardButton(text='🗑️ Очистить refs', callback_data='product:clear')],
                 [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
             ]
         )
         return (
             '🧥 Товар • Референсы\n\n'
-            '🧩 Clean ref = вещь отдельно.\n'
-            '👗 Fit ref = вещь на модели / в образе.\n\n'
             f'Clean ref: {clean_ok}\n'
-            f'Fit ref: {fit_ok}\n\n'
-            '💡 Для сложного низа fit ref часто даёт лучший силуэт.',
+            f'Fit ref: {fit_ok}\n'
+            f'Extra fit refs: {extra_count}\n'
+            f'Scope: {scope}\n'
+            f'Strategy: {strategy}',
             kb,
         )
+
+    if screen == Screen.PRODUCT_STRATEGY:
+        current = (context.get('reference_strategy') or 'auto').lower()
+
+        def label(name: str) -> str:
+            return f'{name} {"✅" if current == name else ""}'.strip()
+
+        rows = [
+            [InlineKeyboardButton(text=label('auto'), callback_data='strategy:set:auto')],
+            [InlineKeyboardButton(text=label('fit_priority'), callback_data='strategy:set:fit_priority')],
+            [InlineKeyboardButton(text=label('clean_priority'), callback_data='strategy:set:clean_priority')],
+            [InlineKeyboardButton(text=label('fit_only'), callback_data='strategy:set:fit_only')],
+            [InlineKeyboardButton(text=label('clean_only'), callback_data='strategy:set:clean_only')],
+            [InlineKeyboardButton(text=label('multi_fit'), callback_data='strategy:set:multi_fit')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:product')],
+        ]
+        return '🧠 Стратегия референсов', InlineKeyboardMarkup(inline_keyboard=rows)
 
     if screen == Screen.PRODUCT_SCOPE:
         current = (context.get('edit_scope') or 'full').lower()
@@ -284,9 +315,16 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
     if screen == Screen.LOOK_ADD_ITEM:
         has_clean = bool(context.get('look_item_clean_file_id') or context.get('look_item_product_file_id'))
         has_fit = bool(context.get('look_item_fit_file_id'))
+        extra_count = len(context.get('look_item_fit_extra_file_ids') or [])
+        item_scope = context.get('look_item_scope') or '—'
+        patch = context.get('look_item_patch_mode')
+        strategy = (context.get('look_item_reference_strategy') or 'auto').lower()
         rows = [
             [InlineKeyboardButton(text='🧩 Clean ref', callback_data='look:item_upload_clean')],
             [InlineKeyboardButton(text='👗 Fit ref', callback_data='look:item_upload_fit')],
+            [InlineKeyboardButton(text='➕ Доп. fit ref', callback_data='look:item_upload_fit_extra')],
+            [InlineKeyboardButton(text='🎛️ Зона', callback_data='nav:look_item_scope_select')],
+            [InlineKeyboardButton(text='🧠 Strategy', callback_data='nav:look_item_strategy')],
         ]
         if has_clean or has_fit:
             rows.append([InlineKeyboardButton(text='⚡ Продолжить', callback_data='look:item_continue')])
@@ -301,10 +339,30 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         return (
             '🧩 Конструктор лука • Добавить предмет\n\n'
             f'Clean ref: {"✅" if has_clean else "❌"}\n'
-            f'Fit ref: {"✅" if has_fit else "❌"}\n\n'
-            'Загрузи clean, fit или оба.',
+            f'Fit ref: {"✅" if has_fit else "❌"}\n'
+            f'Extra fit refs: {extra_count}\n'
+            f'Scope: {item_scope}\n'
+            f'Patch: {"ON ✅" if patch else "OFF ❌" if patch is not None else "—"}\n'
+            f'Strategy: {strategy}',
             InlineKeyboardMarkup(inline_keyboard=rows),
         )
+
+    if screen == Screen.LOOK_ITEM_STRATEGY:
+        current = (context.get('look_item_reference_strategy') or 'auto').lower()
+
+        def label(name: str) -> str:
+            return f'{name} {"✅" if current == name else ""}'.strip()
+
+        rows = [
+            [InlineKeyboardButton(text=label('auto'), callback_data='look:strategy:set:auto')],
+            [InlineKeyboardButton(text=label('fit_priority'), callback_data='look:strategy:set:fit_priority')],
+            [InlineKeyboardButton(text=label('clean_priority'), callback_data='look:strategy:set:clean_priority')],
+            [InlineKeyboardButton(text=label('fit_only'), callback_data='look:strategy:set:fit_only')],
+            [InlineKeyboardButton(text=label('clean_only'), callback_data='look:strategy:set:clean_only')],
+            [InlineKeyboardButton(text=label('multi_fit'), callback_data='look:strategy:set:multi_fit')],
+            [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:look_add_item')],
+        ]
+        return '🧠 Strategy для item', InlineKeyboardMarkup(inline_keyboard=rows)
 
     if screen == Screen.LOOK_ITEM_SCOPE_SELECT:
         current = (context.get('look_item_scope') or '').lower()

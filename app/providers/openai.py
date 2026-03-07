@@ -49,30 +49,35 @@ class OpenAIProvider(ProviderBase):
         storage_key_product: str | None = None,
         storage_key_product_clean: str | None = None,
         storage_key_product_fit: str | None = None,
+        storage_key_product_fit_extra: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
         force_lock: bool = False,
+        reference_strategy: str | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> ProviderResult:
         person_bytes = await self.storage.get_bytes(storage_key_person)
         clean_key = storage_key_product_clean or storage_key_product
         fit_key = storage_key_product_fit
-        if not clean_key and not fit_key:
+        fit_extra_key = storage_key_product_fit_extra
+        if not clean_key and not fit_key and not fit_extra_key:
             raise ProviderBadRequestError('OpenAI requires at least one garment reference')
 
         clean_bytes = await self.storage.get_bytes(clean_key) if clean_key else None
         fit_bytes = await self.storage.get_bytes(fit_key) if fit_key else None
+        fit_extra_bytes = await self.storage.get_bytes(fit_extra_key) if fit_extra_key else None
         prompt = build_tryon_prompt(
             mode,
             scope,
             fit_pref,
             measurements,
             force_lock=force_lock,
+            reference_strategy=reference_strategy,
             has_clean_ref=bool(clean_key),
-            has_fit_ref=bool(fit_key),
+            has_fit_ref=bool(fit_key or fit_extra_key),
         )
 
         form_files, form_data = _build_edit_form(
@@ -84,6 +89,8 @@ class OpenAIProvider(ProviderBase):
             garment_clean_bytes=clean_bytes,
             garment_fit_key=fit_key,
             garment_fit_bytes=fit_bytes,
+            garment_fit_extra_key=fit_extra_key,
+            garment_fit_extra_bytes=fit_extra_bytes,
             include_response_format=True,
         )
 
@@ -108,6 +115,8 @@ class OpenAIProvider(ProviderBase):
                     garment_clean_bytes=clean_bytes,
                     garment_fit_key=fit_key,
                     garment_fit_bytes=fit_bytes,
+                    garment_fit_extra_key=fit_extra_key,
+                    garment_fit_extra_bytes=fit_extra_bytes,
                     include_response_format=False,
                 )
                 response = await client.post(
@@ -126,6 +135,7 @@ class OpenAIProvider(ProviderBase):
                         fit_pref,
                         measurements,
                         force_lock=force_lock,
+                        reference_strategy=reference_strategy,
                         has_clean_ref=bool(clean_key),
                         has_fit_ref=False,
                     ),
@@ -135,6 +145,8 @@ class OpenAIProvider(ProviderBase):
                     garment_clean_bytes=clean_bytes,
                     garment_fit_key=None,
                     garment_fit_bytes=None,
+                    garment_fit_extra_key=None,
+                    garment_fit_extra_bytes=None,
                     include_response_format=False,
                 )
                 response = await client.post(
@@ -273,6 +285,8 @@ def _build_edit_form(
     garment_clean_bytes: bytes | None,
     garment_fit_key: str | None,
     garment_fit_bytes: bytes | None,
+    garment_fit_extra_key: str | None,
+    garment_fit_extra_bytes: bytes | None,
     include_response_format: bool,
 ) -> tuple[list[tuple[str, tuple[str, bytes, str]]], dict[str, str | int]]:
     person_mime = mimetypes.guess_type(person_key)[0] or 'image/jpeg'
@@ -284,6 +298,9 @@ def _build_edit_form(
     if garment_fit_key and garment_fit_bytes is not None:
         garment_fit_mime = mimetypes.guess_type(garment_fit_key)[0] or 'image/jpeg'
         files.append(('image', ('garment_fit.jpg', garment_fit_bytes, garment_fit_mime)))
+    if garment_fit_extra_key and garment_fit_extra_bytes is not None:
+        garment_fit_extra_mime = mimetypes.guess_type(garment_fit_extra_key)[0] or 'image/jpeg'
+        files.append(('image', ('garment_fit_extra.jpg', garment_fit_extra_bytes, garment_fit_extra_mime)))
     data: dict[str, str | int] = {'model': model, 'prompt': prompt, 'n': 1}
     if include_response_format:
         data['response_format'] = 'b64_json'

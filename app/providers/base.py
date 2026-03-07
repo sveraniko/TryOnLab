@@ -68,12 +68,14 @@ class ProviderBase(ABC):
         storage_key_product: str | None = None,
         storage_key_product_clean: str | None = None,
         storage_key_product_fit: str | None = None,
+        storage_key_product_fit_extra: str | None = None,
         storage_key_person: str,
         fit_pref: str | None = None,
         measurements: dict[str, Any] | None = None,
         mode: str | None = None,
         scope: str | None = None,
         force_lock: bool = False,
+        reference_strategy: str | None = None,
         on_progress: Callable[[int], Awaitable[None]] | None = None,
     ) -> ProviderResult:
         raise NotImplementedError

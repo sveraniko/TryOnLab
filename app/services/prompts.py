@@ -88,6 +88,7 @@ def build_tryon_prompt(
     force_lock: bool = False,
     has_clean_ref: bool = True,
     has_fit_ref: bool = False,
+    reference_strategy: str | None = None,
 ) -> str:
     normalized_mode = (mode or 'strict').strip().lower()
     if normalized_mode not in {'strict', 'creative'}:
@@ -99,6 +100,7 @@ def build_tryon_prompt(
 
     fit_value = (fit_pref or 'regular').strip().lower()
     fit_line = FIT_DIRECTIVES.get(fit_value, FIT_DIRECTIVES['regular'])
+    strategy = (reference_strategy or 'auto').strip().lower()
 
     lines = [
         BASE_IDENTITY_RULES,
@@ -117,27 +119,24 @@ def build_tryon_prompt(
             ]
         )
     elif has_clean_ref:
-        lines.extend(
-            [
-                'Use GARMENT_CLEAN_IMAGE as the primary source of garment details, material, closures, and exact design.',
-                'Match product color, texture, silhouette, and key details as realistically as possible.',
-            ]
-        )
+        lines.append('Use GARMENT_CLEAN_IMAGE as the primary source of garment details and exact design.')
     elif has_fit_ref:
-        lines.extend(
-            [
-                'Use GARMENT_FIT_REFERENCE_IMAGE as the primary source of silhouette, fit, rise, drape, and length.',
-                'Preserve garment proportions and visual design from fit reference while keeping identity and scene unchanged.',
-            ]
-        )
+        lines.append('Use GARMENT_FIT_REFERENCE_IMAGE as the primary source of silhouette, fit, rise, drape, and length.')
     else:
-        lines.extend(
-            [
-                'Use GARMENT_IMAGE as product reference.',
-                'Match product color, texture, silhouette, and key details as realistically as possible.',
-            ]
-        )
+        lines.append('Use GARMENT_IMAGE as product reference.')
 
+    if strategy == 'clean_priority':
+        lines.append('Use GARMENT_CLEAN_IMAGE as the primary source of garment details and exact design.')
+        lines.append('Use fit reference only as a secondary guide for silhouette.')
+    elif strategy == 'fit_priority':
+        lines.append('Use GARMENT_FIT_REFERENCE_IMAGE as the primary source of silhouette, fit, rise, drape, and length.')
+        lines.append('Use clean reference only as a secondary source for details.')
+    elif strategy == 'fit_only':
+        lines.append('Rely entirely on fit reference for silhouette and garment appearance.')
+    elif strategy == 'clean_only':
+        lines.append('Rely entirely on clean reference for garment appearance.')
+    elif strategy == 'multi_fit':
+        lines.append('Use both fit references to infer consistent silhouette and how the garment sits on the body.')
     if has_fit_ref and normalized_scope == 'lower':
         lines.extend(
             [
@@ -148,6 +147,9 @@ def build_tryon_prompt(
     if has_fit_ref and normalized_scope == 'upper':
         lines.append('Follow sleeve shape, shoulder volume, jacket length, and closure placement from fit reference.')
 
+
+    if has_fit_ref and normalized_scope in {'lower', 'full'} and strategy in {'fit_priority', 'multi_fit'}:
+        lines.append('Preserve waistband rise, pleat structure, hip volume, taper, and length according to fit reference.')
     if force_lock and normalized_scope != 'full':
         lines.extend([
             'Do not change anything outside the edited region.',

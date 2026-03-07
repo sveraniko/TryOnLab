@@ -32,7 +32,7 @@ def test_apply_uses_both_refs_when_present() -> None:
         )
     )
 
-    files = captured['files']
+    files = dict(captured['files'])
     assert 'product_clean_image' in files
     assert 'product_fit_image' in files
 
@@ -60,6 +60,6 @@ def test_apply_fallback_to_single_ref() -> None:
         )
     )
 
-    files = captured['files']
+    files = dict(captured['files'])
     assert 'product_clean_image' in files
     assert 'product_fit_image' not in files

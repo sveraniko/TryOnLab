@@ -55,6 +55,7 @@ class ApiClient:
         product: bytes | None = None,
         product_clean: bytes | None = None,
         product_fit: bytes | None = None,
+        product_fit_extras: list[bytes] | None = None,
         user_photo_id: int | None,
         person_image: bytes | None = None,
         fit_pref: str | None,
@@ -62,18 +63,21 @@ class ApiClient:
         mode: str | None,
         scope: str | None,
         force_lock: bool = False,
+        reference_strategy: str | None = None,
     ) -> dict[str, Any]:
-        files: dict[str, tuple[str, bytes, str]] = {}
+        files: list[tuple[str, tuple[str, bytes, str]]] = []
         effective_clean = product_clean or product
         if effective_clean is not None:
-            files['product_clean_image'] = ('product_clean.jpg', effective_clean, 'image/jpeg')
+            files.append(('product_clean_image', ('product_clean.jpg', effective_clean, 'image/jpeg')))
         if product_fit is not None:
-            files['product_fit_image'] = ('product_fit.jpg', product_fit, 'image/jpeg')
+            files.append(('product_fit_image', ('product_fit.jpg', product_fit, 'image/jpeg')))
+        for idx, extra in enumerate(product_fit_extras or []):
+            files.append(('product_fit_extra_images', (f'product_fit_extra_{idx}.jpg', extra, 'image/jpeg')))
         if not files:
             raise ValueError('At least one product reference is required')
         data: dict[str, Any] = {}
         if person_image is not None:
-            files['person_image'] = ('person.jpg', person_image, 'image/jpeg')
+            files.append(('person_image', ('person.jpg', person_image, 'image/jpeg')))
         elif user_photo_id is not None:
             data['user_photo_id'] = str(user_photo_id)
         else:
@@ -88,6 +92,8 @@ class ApiClient:
             data['mode'] = mode
         if scope:
             data['scope'] = scope
+        if reference_strategy:
+            data['reference_strategy'] = reference_strategy
         data['force_lock'] = '1' if force_lock else '0'
         return await self._request('POST', '/jobs', files=files, data=data)
 

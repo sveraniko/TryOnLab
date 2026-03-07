@@ -4,6 +4,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
+REFERENCE_STRATEGIES = {'auto', 'fit_priority', 'clean_priority', 'fit_only', 'clean_only', 'multi_fit'}
+
 
 def new_look_step(*, job_id: str, result_image_url: str, mode: str, scope: str, provider: str) -> dict[str, str]:
     return {
@@ -51,6 +53,8 @@ def reset_look(session_data: dict[str, Any]) -> dict[str, Any]:
     updated['look_item_product_file_id'] = None
     updated['look_item_clean_file_id'] = None
     updated['look_item_fit_file_id'] = None
+    updated['look_item_fit_extra_file_ids'] = []
+    updated['look_item_reference_strategy'] = None
     updated['look_item_scope'] = None
     updated['look_active'] = True
     return updated
@@ -99,3 +103,34 @@ def resolve_item_refs(session_data: dict[str, Any]) -> dict[str, str | None]:
     clean = session_data.get('look_item_clean_file_id') or session_data.get('look_item_product_file_id')
     fit = session_data.get('look_item_fit_file_id')
     return {'clean': clean, 'fit': fit}
+
+
+def append_extra_fit_ref(values: list[str] | None, file_id: str, *, max_refs: int = 2) -> list[str]:
+    items = list(values or [])
+    if len(items) >= max_refs:
+        raise ValueError(f'Maximum {max_refs} extra fit refs')
+    items.append(file_id)
+    return items
+
+
+def resolve_reference_strategy(
+    strategy: str | None,
+    *,
+    scope: str | None,
+    clean_exists: bool,
+    fit_exists: bool,
+    extra_fit_count: int = 0,
+) -> str:
+    explicit = (strategy or '').strip().lower()
+    if explicit in REFERENCE_STRATEGIES:
+        return explicit
+    normalized_scope = (scope or '').strip().lower()
+    if fit_exists and normalized_scope in {'lower', 'full'}:
+        return 'fit_priority'
+    if clean_exists and normalized_scope == 'upper':
+        return 'clean_priority'
+    if not clean_exists and fit_exists and extra_fit_count > 0:
+        return 'multi_fit'
+    if clean_exists and not fit_exists and extra_fit_count == 0:
+        return 'clean_only'
+    return 'auto'
