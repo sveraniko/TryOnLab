@@ -71,6 +71,15 @@ def _normalize_scope(scope: str | None) -> str:
     return value
 
 
+def _normalize_reference_strategy(reference_strategy: str | None) -> str:
+    if not isinstance(reference_strategy, str):
+        return 'auto'
+    value = (reference_strategy or 'auto').strip().lower()
+    if value not in {'auto', 'fit_priority', 'clean_priority', 'fit_only', 'clean_only', 'multi_fit'}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Invalid reference_strategy')
+    return value
+
+
 
 def _normalize_force_lock(force_lock: str | None) -> bool:
     value = (force_lock or '0').strip()
@@ -112,6 +121,7 @@ async def create_job(
     product_image: UploadFile | None = File(default=None),
     product_clean_image: UploadFile | None = File(default=None),
     product_fit_image: UploadFile | None = File(default=None),
+    product_fit_extra_images: list[UploadFile] | None = File(default=None),
     person_image: UploadFile | None = File(default=None),
     user_photo_id: int | None = Form(default=None),
     fit_pref: str | None = Form(default=None),
@@ -120,6 +130,7 @@ async def create_job(
     provider: str | None = Form(default=None),
     mode: str | None = Form(default=None),
     scope: str | None = Form(default=None),
+    reference_strategy: str | None = Form(default=None),
     force_lock: str | None = Form(default='0'),
     session: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
@@ -165,6 +176,7 @@ async def create_job(
     measurements = parse_measurements_json(measurements_json)
     normalized_mode = _normalize_mode(mode)
     normalized_scope = _normalize_scope(scope)
+    normalized_reference_strategy = _normalize_reference_strategy(reference_strategy)
     normalized_force_lock = _normalize_force_lock(force_lock)
 
     user_settings = await ensure_user_settings(
@@ -175,6 +187,7 @@ async def create_job(
     job_id = uuid.uuid4()
     product_clean_key = None
     product_fit_key = None
+    product_fit_extra_keys: list[str] = []
     if clean_payload is not None:
         clean_bytes, clean_content_type, _clean_filename = clean_payload
         product_clean_key = job_key(job_id, 'input', 'product_clean.jpg')
@@ -183,8 +196,17 @@ async def create_job(
         fit_bytes, fit_content_type, _fit_filename = fit_payload
         product_fit_key = job_key(job_id, 'input', 'product_fit.jpg')
         await storage.put_bytes(product_fit_key, fit_bytes, content_type=fit_content_type)
+    extra_fit_images = product_fit_extra_images if isinstance(product_fit_extra_images, list) else []
+    if extra_fit_images:
+        if len(extra_fit_images) > 2:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Max 2 product_fit_extra_images')
+        for index, extra_file in enumerate(extra_fit_images):
+            extra_bytes, extra_content_type, _ = await validate_image_upload(extra_file, settings.max_upload_mb)
+            extra_key = job_key(job_id, 'input', f'product_fit_extra_{index}.jpg')
+            await storage.put_bytes(extra_key, extra_bytes, content_type=extra_content_type)
+            product_fit_extra_keys.append(extra_key)
 
-    product_key = product_clean_key or product_fit_key
+    product_key = product_clean_key or product_fit_key or (product_fit_extra_keys[0] if product_fit_extra_keys else None)
 
     if person_bytes is not None and person_content_type is not None and person_filename is not None:
         person_key = job_key(job_id, 'input', person_filename)
@@ -197,11 +219,13 @@ async def create_job(
     else:
         ref_mode = 'fit_only'
 
-    inputs_json = {"mode": normalized_mode, "scope": normalized_scope, "force_lock": normalized_force_lock, 'product_reference_mode': ref_mode}
+    inputs_json = {"mode": normalized_mode, "scope": normalized_scope, "force_lock": normalized_force_lock, 'product_reference_mode': ref_mode, 'reference_strategy': normalized_reference_strategy}
     if product_clean_key:
         inputs_json['product_clean_key'] = product_clean_key
     if product_fit_key:
         inputs_json['product_fit_key'] = product_fit_key
+    if product_fit_extra_keys:
+        inputs_json['product_fit_extra_keys'] = product_fit_extra_keys
 
     job = await create_image_job(
         session,
