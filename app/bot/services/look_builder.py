@@ -49,6 +49,8 @@ def reset_look(session_data: dict[str, Any]) -> dict[str, Any]:
     updated['look_steps'] = 0
     updated['look_base_job_id'] = None
     updated['look_item_product_file_id'] = None
+    updated['look_item_clean_file_id'] = None
+    updated['look_item_fit_file_id'] = None
     updated['look_item_scope'] = None
     updated['look_active'] = True
     return updated
@@ -91,3 +93,9 @@ def default_patch_mode_for_item(scope: str | None, global_patch_mode: bool | Non
     if global_patch_mode is None:
         return True
     return bool(global_patch_mode)
+
+
+def resolve_item_refs(session_data: dict[str, Any]) -> dict[str, str | None]:
+    clean = session_data.get('look_item_clean_file_id') or session_data.get('look_item_product_file_id')
+    fit = session_data.get('look_item_fit_file_id')
+    return {'clean': clean, 'fit': fit}

@@ -39,13 +39,14 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         video = '✅' if context.get('provider_video') else '❌'
         active = me.get('active_user_photo_id')
         stored = me.get('stored_user_photos_count', 0)
-        product_ok = '✅' if context.get('product_file_id') else '❌'
+        product_clean_ok = bool(context.get('product_clean_file_id') or context.get('product_file_id'))
+        product_fit_ok = bool(context.get('product_fit_file_id'))
         fit = context.get('fit_pref') or '—'
         ms = '✅' if context.get('measurements_json') else '—'
         mode = (context.get('gen_mode') or 'strict').title()
         mode_icon = '🔒' if (context.get('gen_mode') or 'strict') == 'strict' else '✨'
         scope = (context.get('edit_scope') or 'full').title()
-        can_generate = bool(context.get('product_file_id') and active)
+        can_generate = bool((product_clean_ok or product_fit_ok) and active)
         last_image_status = context.get('last_image_status', '—')
         has_last_image = last_image_status == 'done' and bool(context.get('last_image_job_id'))
         lower_hint = '\n💡 Lower + Patch = experimental' if (context.get('edit_scope') or '').lower() == 'lower' else ''
@@ -53,7 +54,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
             '🧪 TryOnLab • Dashboard\n\n'
             f'🧠 Provider: {provider} (video {video})\n'
             f'👤 User photo: {"✅" if active else "❌"} active ({active or "—"}) | stored: {stored}\n'
-            f'🧥 Product photo: {product_ok} 1/1\n'
+            f'🧥 Product refs: clean {"✅" if product_clean_ok else "❌"} | fit {"✅" if product_fit_ok else "❌"}\n'
             f'🧩 Mode: {mode} {mode_icon}\n'
             f'🎛️ Scope: {scope}\n'
             f'🎯 Fit: {fit}\n'
@@ -65,14 +66,25 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         return text, home_keyboard(can_generate=can_generate, has_last_image=has_last_image)
 
     if screen == Screen.PRODUCT:
-        ok = '✅ 1/1' if context.get('product_file_id') else '❌ 0/1'
+        clean_ok = '✅' if (context.get('product_clean_file_id') or context.get('product_file_id')) else '❌'
+        fit_ok = '✅' if context.get('product_fit_file_id') else '❌'
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text='🗑️ Очистить товар', callback_data='product:clear'), InlineKeyboardButton(text='🔁 Заменить', callback_data='nav:product')],
+                [InlineKeyboardButton(text='🧩 Clean ref', callback_data='product:upload_clean')],
+                [InlineKeyboardButton(text='👗 Fit ref', callback_data='product:upload_fit')],
+                [InlineKeyboardButton(text='🗑️ Очистить всё', callback_data='product:clear')],
                 [InlineKeyboardButton(text='⬅️ Назад', callback_data='nav:home')],
             ]
         )
-        return f'🧥 Товар • Загрузка\n\nПришли 1 фото товара в этот чат.\n\nТекущий статус: {ok}', kb
+        return (
+            '🧥 Товар • Референсы\n\n'
+            '🧩 Clean ref = вещь отдельно.\n'
+            '👗 Fit ref = вещь на модели / в образе.\n\n'
+            f'Clean ref: {clean_ok}\n'
+            f'Fit ref: {fit_ok}\n\n'
+            '💡 Для сложного низа fit ref часто даёт лучший силуэт.',
+            kb,
+        )
 
     if screen == Screen.PRODUCT_SCOPE:
         current = (context.get('edit_scope') or 'full').lower()
@@ -270,11 +282,27 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         return text, InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
     if screen == Screen.LOOK_ADD_ITEM:
-        rows = [[InlineKeyboardButton(text='⛔ Отмена', callback_data='look:cancel_add')]]
-        if context.get('product_file_id'):
-            rows.insert(0, [InlineKeyboardButton(text='♻️ Использовать текущий товар из сессии', callback_data='look:use_session_product')])
+        has_clean = bool(context.get('look_item_clean_file_id') or context.get('look_item_product_file_id'))
+        has_fit = bool(context.get('look_item_fit_file_id'))
+        rows = [
+            [InlineKeyboardButton(text='🧩 Clean ref', callback_data='look:item_upload_clean')],
+            [InlineKeyboardButton(text='👗 Fit ref', callback_data='look:item_upload_fit')],
+        ]
+        if has_clean or has_fit:
+            rows.append([InlineKeyboardButton(text='⚡ Продолжить', callback_data='look:item_continue')])
+        rows.extend(
+            [
+                [InlineKeyboardButton(text='🗑️ Очистить item', callback_data='look:item_clear')],
+                [InlineKeyboardButton(text='⬅️ Назад', callback_data='look:cancel_add')],
+            ]
+        )
+        if context.get('product_clean_file_id') or context.get('product_file_id'):
+            rows.insert(0, [InlineKeyboardButton(text='♻️ Взять Clean ref из PRODUCT', callback_data='look:use_session_product')])
         return (
-            '🧩 Конструктор лука • Добавить предмет\n\nПришли 1 фото предмета для добавления в лук.\nПосле успешной загрузки я удалю сообщение (best-effort).',
+            '🧩 Конструктор лука • Добавить предмет\n\n'
+            f'Clean ref: {"✅" if has_clean else "❌"}\n'
+            f'Fit ref: {"✅" if has_fit else "❌"}\n\n'
+            'Загрузи clean, fit или оба.',
             InlineKeyboardMarkup(inline_keyboard=rows),
         )
 
@@ -301,7 +329,7 @@ def render(screen: Screen, context: dict) -> tuple[str, InlineKeyboardMarkup]:
         scope = (context.get('look_item_scope') or '—').title()
         provider = context.get('me', {}).get('provider', '—')
         steps = int(context.get('look_steps') or 0)
-        has_item = bool(context.get('look_item_product_file_id'))
+        has_item = bool(context.get('look_item_clean_file_id') or context.get('look_item_product_file_id') or context.get('look_item_fit_file_id'))
         rows = []
         item_patch_mode = context.get('look_item_patch_mode')
         if has_item and scope != '—':

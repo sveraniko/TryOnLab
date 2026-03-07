@@ -27,7 +27,8 @@ async def execute_job(
 
     if job.type == 'tryon_image':
         person_key = await _resolve_person_key(session, job)
-        if not job.product_media_key:
+        clean_key, fit_key = _resolve_product_keys(job)
+        if not clean_key and not fit_key:
             raise ProviderBadRequestError('No product image')
 
         mode = _input(job, 'mode', 'strict')
@@ -51,6 +52,8 @@ async def execute_job(
             result = await provider.generate_image(
                 job_id=str(job.id),
                 storage_key_product=job.product_media_key,
+                storage_key_product_clean=clean_key,
+                storage_key_product_fit=fit_key,
                 storage_key_person=crop_key,
                 fit_pref=job.fit_pref,
                 measurements=job.measurements_json,
@@ -84,6 +87,8 @@ async def execute_job(
         result = await provider.generate_image(
             job_id=str(job.id),
             storage_key_product=job.product_media_key,
+            storage_key_product_clean=clean_key,
+            storage_key_product_fit=fit_key,
             storage_key_person=person_key,
             fit_pref=job.fit_pref,
             measurements=job.measurements_json,
@@ -166,3 +171,11 @@ def _input_bool(job: Job, key: str, default: bool) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {'1', 'true', 'yes', 'on'}
     return bool(value)
+
+
+def _resolve_product_keys(job: Job) -> tuple[str | None, str | None]:
+    if not job.inputs_json:
+        return job.product_media_key, None
+    clean_key = job.inputs_json.get('product_clean_key') or job.product_media_key
+    fit_key = job.inputs_json.get('product_fit_key')
+    return str(clean_key) if clean_key else None, str(fit_key) if fit_key else None

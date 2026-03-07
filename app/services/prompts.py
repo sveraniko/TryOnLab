@@ -86,6 +86,8 @@ def build_tryon_prompt(
     measurements: dict[str, Any] | None,
     *,
     force_lock: bool = False,
+    has_clean_ref: bool = True,
+    has_fit_ref: bool = False,
 ) -> str:
     normalized_mode = (mode or 'strict').strip().lower()
     if normalized_mode not in {'strict', 'creative'}:
@@ -101,12 +103,50 @@ def build_tryon_prompt(
     lines = [
         BASE_IDENTITY_RULES,
         'Use PERSON_IMAGE as base.',
-        'Use GARMENT_IMAGE as product reference.',
-        "Match product color, texture, silhouette, and key details as realistically as possible.",
         fit_line,
         f'Mode: {normalized_mode}.',
         f'Scope: {normalized_scope}.',
     ]
+
+    if has_clean_ref and has_fit_ref:
+        lines.extend(
+            [
+                'Use GARMENT_CLEAN_IMAGE as the primary source of garment details, material, closures, and exact design.',
+                'Use GARMENT_FIT_REFERENCE_IMAGE as the primary source of silhouette, fit, rise, drape, and length.',
+                'Do not mix roles: clean reference controls details, fit reference controls silhouette/fit.',
+            ]
+        )
+    elif has_clean_ref:
+        lines.extend(
+            [
+                'Use GARMENT_CLEAN_IMAGE as the primary source of garment details, material, closures, and exact design.',
+                'Match product color, texture, silhouette, and key details as realistically as possible.',
+            ]
+        )
+    elif has_fit_ref:
+        lines.extend(
+            [
+                'Use GARMENT_FIT_REFERENCE_IMAGE as the primary source of silhouette, fit, rise, drape, and length.',
+                'Preserve garment proportions and visual design from fit reference while keeping identity and scene unchanged.',
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                'Use GARMENT_IMAGE as product reference.',
+                'Match product color, texture, silhouette, and key details as realistically as possible.',
+            ]
+        )
+
+    if has_fit_ref and normalized_scope == 'lower':
+        lines.extend(
+            [
+                'Follow the lower-body silhouette from GARMENT_FIT_REFERENCE_IMAGE closely.',
+                'Preserve the waistband rise, volume at hips, taper, and length.',
+            ]
+        )
+    if has_fit_ref and normalized_scope == 'upper':
+        lines.append('Follow sleeve shape, shoulder volume, jacket length, and closure placement from fit reference.')
 
     if force_lock and normalized_scope != 'full':
         lines.extend([

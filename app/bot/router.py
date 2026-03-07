@@ -111,6 +111,14 @@ async def _read_result_bytes(url: str) -> bytes:
         return r.content
 
 
+def _product_clean_file_id(data: dict) -> str | None:
+    return data.get('product_clean_file_id') or data.get('product_file_id')
+
+
+def _look_item_clean_file_id(data: dict) -> str | None:
+    return data.get('look_item_clean_file_id') or data.get('look_item_product_file_id')
+
+
 @router.message(Command('start'))
 async def start_handler(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     api = await _client(message, settings)
@@ -146,9 +154,7 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
         'look_home': Screen.LOOK_HOME,
     }
     screen = mapping.get(target, Screen.HOME)
-    if screen == Screen.PRODUCT:
-        await state.set_state(WizardStates.await_product_photo)
-    elif screen == Screen.USER_PHOTO_UPLOAD:
+    if screen == Screen.USER_PHOTO_UPLOAD:
         await state.set_state(WizardStates.await_user_photo_upload)
     elif screen == Screen.MEASUREMENTS:
         await state.set_state(None)
@@ -178,15 +184,52 @@ async def nav_handler(query: CallbackQuery, state: FSMContext, bot: Bot, setting
 @router.callback_query(F.data == 'product:clear')
 async def clear_product(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    await state.update_data(product_file_id=None)
+    await state.update_data(product_file_id=None, product_clean_file_id=None, product_fit_file_id=None)
+    await state.set_state(None)
     api = await _client(query, settings)
     await _switch_screen(bot, state, query.message.chat.id, api, settings, Screen.PRODUCT)
+
+
+@router.callback_query(F.data == 'product:upload_clean')
+async def product_upload_clean(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Пришли фото clean ref')
+    await state.set_state(WizardStates.await_product_clean_photo)
+    await state.update_data(screen=Screen.PRODUCT.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'product:upload_fit')
+async def product_upload_fit(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Пришли фото fit ref')
+    await state.set_state(WizardStates.await_product_fit_photo)
+    await state.update_data(screen=Screen.PRODUCT.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
 
 
 @router.message(WizardStates.await_product_photo, F.photo)
 async def on_product_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     file_id = message.photo[-1].file_id
-    await state.update_data(product_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
+    await state.update_data(product_file_id=file_id, product_clean_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
+    await try_delete(bot, message.chat.id, message.message_id)
+    api = await _client(message, settings)
+    await _render_current(bot, state, message.chat.id, api, settings)
+
+
+@router.message(WizardStates.await_product_clean_photo, F.photo)
+async def on_product_clean_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    file_id = message.photo[-1].file_id
+    await state.update_data(product_file_id=file_id, product_clean_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
+    await try_delete(bot, message.chat.id, message.message_id)
+    api = await _client(message, settings)
+    await _render_current(bot, state, message.chat.id, api, settings)
+
+
+@router.message(WizardStates.await_product_fit_photo, F.photo)
+async def on_product_fit_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    file_id = message.photo[-1].file_id
+    await state.update_data(product_fit_file_id=file_id, screen=Screen.PRODUCT_SCOPE.value)
     await try_delete(bot, message.chat.id, message.message_id)
     api = await _client(message, settings)
     await _render_current(bot, state, message.chat.id, api, settings)
@@ -195,7 +238,25 @@ async def on_product_photo(message: Message, state: FSMContext, bot: Bot, settin
 @router.message(WizardStates.await_look_item_photo, F.photo)
 async def on_look_item_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
     file_id = message.photo[-1].file_id
-    await state.update_data(look_item_product_file_id=file_id, look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    await state.update_data(look_item_product_file_id=file_id, look_item_clean_file_id=file_id, look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ADD_ITEM.value)
+    await try_delete(bot, message.chat.id, message.message_id)
+    api = await _client(message, settings)
+    await _render_current(bot, state, message.chat.id, api, settings)
+
+
+@router.message(WizardStates.await_look_item_clean_photo, F.photo)
+async def on_look_item_clean_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    file_id = message.photo[-1].file_id
+    await state.update_data(look_item_product_file_id=file_id, look_item_clean_file_id=file_id, look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ADD_ITEM.value)
+    await try_delete(bot, message.chat.id, message.message_id)
+    api = await _client(message, settings)
+    await _render_current(bot, state, message.chat.id, api, settings)
+
+
+@router.message(WizardStates.await_look_item_fit_photo, F.photo)
+async def on_look_item_fit_photo(message: Message, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    file_id = message.photo[-1].file_id
+    await state.update_data(look_item_fit_file_id=file_id, look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ADD_ITEM.value)
     await try_delete(bot, message.chat.id, message.message_id)
     api = await _client(message, settings)
     await _render_current(bot, state, message.chat.id, api, settings)
@@ -393,7 +454,9 @@ async def generate_image(query: CallbackQuery, state: FSMContext, bot: Bot, sett
     api = await _client(query, settings)
     data = await state.get_data()
     me = await api.get_me()
-    if not data.get('product_file_id') or not me.get('active_user_photo_id'):
+    clean_file_id = _product_clean_file_id(data)
+    fit_file_id = data.get('product_fit_file_id')
+    if not (clean_file_id or fit_file_id) or not me.get('active_user_photo_id'):
         await query.answer('Нужны product и active user photo', show_alert=True)
         return
     if not await _consume_rate_limit(
@@ -405,10 +468,19 @@ async def generate_image(query: CallbackQuery, state: FSMContext, bot: Bot, sett
         await query.answer('Лимит генераций изображений исчерпан (1ч)', show_alert=True)
         return
 
-    file = await bot.get_file(data['product_file_id'])
-    stream = await bot.download_file(file.file_path)
+    clean_bytes = None
+    fit_bytes = None
+    if clean_file_id:
+        file = await bot.get_file(clean_file_id)
+        stream = await bot.download_file(file.file_path)
+        clean_bytes = stream.read()
+    if fit_file_id:
+        fit_file = await bot.get_file(fit_file_id)
+        fit_stream = await bot.download_file(fit_file.file_path)
+        fit_bytes = fit_stream.read()
     job = await api.create_job(
-        product=stream.read(),
+        product_clean=clean_bytes,
+        product_fit=fit_bytes,
         user_photo_id=me['active_user_photo_id'],
         fit_pref=data.get('fit_pref'),
         measurements_json=data.get('measurements_json'),
@@ -463,7 +535,7 @@ async def generate_video(query: CallbackQuery, state: FSMContext, bot: Bot, sett
 @router.callback_query(F.data == 'look:add_item')
 async def look_add_item(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    await state.set_state(WizardStates.await_look_item_photo)
+    await state.set_state(None)
     await state.update_data(screen=Screen.LOOK_ADD_ITEM.value, look_active=True)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
@@ -482,10 +554,19 @@ async def look_cancel_add(query: CallbackQuery, state: FSMContext, bot: Bot, set
 async def look_use_session_product(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
     data = await state.get_data()
-    if not data.get('product_file_id'):
+    clean = _product_clean_file_id(data)
+    if not clean:
         return
     await state.set_state(None)
-    await state.update_data(look_item_product_file_id=data['product_file_id'], look_item_scope=None, look_item_patch_mode=None, look_active=True, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    await state.update_data(
+        look_item_product_file_id=clean,
+        look_item_clean_file_id=clean,
+        look_item_fit_file_id=data.get('product_fit_file_id'),
+        look_item_scope=None,
+        look_item_patch_mode=None,
+        look_active=True,
+        screen=Screen.LOOK_ADD_ITEM.value,
+    )
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
@@ -493,8 +574,47 @@ async def look_use_session_product(query: CallbackQuery, state: FSMContext, bot:
 @router.callback_query(F.data == 'look:back_add')
 async def look_back_add(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    await state.set_state(WizardStates.await_look_item_photo)
+    await state.set_state(None)
     await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:item_upload_clean')
+async def look_item_upload_clean(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Пришли clean ref item')
+    await state.set_state(WizardStates.await_look_item_clean_photo)
+    await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:item_upload_fit')
+async def look_item_upload_fit(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer('Пришли fit ref item')
+    await state.set_state(WizardStates.await_look_item_fit_photo)
+    await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:item_continue')
+async def look_item_continue(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    data = await state.get_data()
+    if not (_look_item_clean_file_id(data) or data.get('look_item_fit_file_id')):
+        await query.answer('Нужен хотя бы один ref', show_alert=True)
+        return
+    await state.set_state(None)
+    await state.update_data(look_item_scope=None, look_item_patch_mode=None, screen=Screen.LOOK_ITEM_SCOPE_SELECT.value)
+    api = await _client(query, settings)
+    await _render_current(bot, state, query.message.chat.id, api, settings)
+
+
+@router.callback_query(F.data == 'look:item_clear')
+async def look_item_clear(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await state.update_data(look_item_product_file_id=None, look_item_clean_file_id=None, look_item_fit_file_id=None, look_item_scope=None, look_item_patch_mode=None, screen=Screen.LOOK_ADD_ITEM.value)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
 
@@ -516,7 +636,7 @@ async def look_item_scope(query: CallbackQuery, state: FSMContext, bot: Bot, set
 @router.callback_query(F.data == 'look:replace_item')
 async def look_replace_item(query: CallbackQuery, state: FSMContext, bot: Bot, settings: Settings) -> None:
     await query.answer()
-    await state.set_state(WizardStates.await_look_item_photo)
+    await state.set_state(None)
     await state.update_data(screen=Screen.LOOK_ADD_ITEM.value)
     api = await _client(query, settings)
     await _render_current(bot, state, query.message.chat.id, api, settings)
@@ -548,9 +668,10 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
     api = await _client(query, settings)
     data = await state.get_data()
     me = await api.get_me()
-    item_file_id = data.get('look_item_product_file_id')
+    item_clean_file_id = _look_item_clean_file_id(data)
+    item_fit_file_id = data.get('look_item_fit_file_id')
     item_scope = data.get('look_item_scope')
-    if not item_file_id or not item_scope:
+    if not (item_clean_file_id or item_fit_file_id) or not item_scope:
         await query.answer('Сначала добавь предмет и выбери Scope', show_alert=True)
         return
 
@@ -571,9 +692,16 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
         await query.answer('Лимит генераций изображений исчерпан (1ч)', show_alert=True)
         return
 
-    prod_file = await bot.get_file(item_file_id)
-    prod_stream = await bot.download_file(prod_file.file_path)
-    product_bytes = prod_stream.read()
+    product_clean_bytes = None
+    product_fit_bytes = None
+    if item_clean_file_id:
+        prod_clean_file = await bot.get_file(item_clean_file_id)
+        prod_clean_stream = await bot.download_file(prod_clean_file.file_path)
+        product_clean_bytes = prod_clean_stream.read()
+    if item_fit_file_id:
+        prod_fit_file = await bot.get_file(item_fit_file_id)
+        prod_fit_stream = await bot.download_file(prod_fit_file.file_path)
+        product_fit_bytes = prod_fit_stream.read()
 
     person_image_bytes = await resolve_person_image_bytes(
         api_client=api,
@@ -582,7 +710,8 @@ async def look_apply(query: CallbackQuery, state: FSMContext, bot: Bot, settings
     )
 
     job = await api.create_job(
-        product=product_bytes,
+        product_clean=product_clean_bytes,
+        product_fit=product_fit_bytes,
         person_image=person_image_bytes,
         user_photo_id=selected_person['user_photo_id'],
         fit_pref=data.get('fit_pref'),
